@@ -1,0 +1,2136 @@
+---
+title: "Final_Report_Group_11"
+author: "Group_11"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    css: style.css
+    code_folding: hide
+    toc: yes
+    toc_float: yes
+    toc_collapsed: yes
+  pdf_document:
+    toc: yes
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+library(nnet)
+library(MASS)
+library(FNN)
+library(patchwork)
+library(ggplot2)
+library(corrplot)
+library(dplyr)
+library(plotly)
+library(pcaPP)
+library(ggpubr)
+library(tidyr)
+library(factoextra)
+library(FactoMineR)
+library(ggridges)
+library(tidyverse)
+library(devtools)
+library(corrplot)
+library(vcd)
+library(stats) 
+library(RColorBrewer)
+library(pheatmap)
+library(ggbiplot)
+library(mice)
+library(gridExtra)
+library(data.table)
+library(ROSE)
+library(fastDummies)
+library(reshape2)
+library(do)
+library(dplyr)
+library(missForest)
+library(readr)
+library(caret)
+library(parallel)
+library(doParallel)
+library(xgboost)
+library(randomForest)
+library(tabnet)
+library(pROC)
+library(catboost)
+library(lightgbm)
+library(iml)
+library(ggplot2)
+library(PRROC)
+library(dplyr)
+library(cowplot)
+library(pheatmap)
+library(e1071)
+library(rpart)
+KNIT=FALSE
+```
+
+## 1 Overview
+
+### 1.1 Classification Problem Statement
+
+The theme of this study is to predict the return survival status as well as the cause of death of the population through different vitamin and micronutrient intake and dietary habits and their underlying health status**(Yokosawa, 2018)**. Thus, the dietary habits and nutrient intake characteristics that are most relevant to survival status and various major diseases are analyzed. Survival analysis is a topic of great interest in the medical and academic worlds, and since 2016, the number of PubMed articles published annually using the NHANES database as a data source has been 4,000+ **(Zhou,2023)**, with no shortage of top-tier journals such as JAMA. However, most of these articles only analyze the effect of a certain behavior or a certain physiological indicator on mortality in a certain group, and most of the methods assume a linear relationship between mortality and factors**(Afshin, 2015)**. Such studies are of limited relevance to the public. This has resulted in benefits for nutrition and health practitioners, allowing them to offer more specialized programs to their clients and leaving potential health insurance costs to the government.
+
+### 1.2 Data Description and Cleaning
+
+The metadata for this study were obtained from the NHANES database, and some of the feature engineering methods were borrowed from the FPED database. Data processing and manipulation were performed using the R programming language with the help of the nhanesR library developed by Dr. Jing Zhang of Shanghai Tongren Hospital. Subsequently, the processed data were exported for analysis (the full code, including data table merging and partial feature engineering follows).
+This research dataset was generated through a collaborative effort between two prominent government entities: the United States Department of Agriculture (USDA) and the United States Department of Health and Human Services (DHHS). Within this collaborative framework, DHHS's National Center for Health Statistics (NCHS), Division of Health and Nutrition Examination Surveys is responsible for the management and collection of the data, a process that takes place every two years, with 5,000 randomly-selected individuals from 15 U.S. counties representing the U.S. country name each time. Data collection is carried out by specialised and trained personnel, and the significance and measurement of each characteristic is officially explained. At the same time, USDA's Food Survey Research Group (FSRG) was tasked with developing the methodology for dietary data collection, as well as the maintenance and management of the database used for data coding and processing. This collaboration ensured the comprehensive and rigorous quality of data acquisition and analysis in this study.(https://wwwn.cdc.gov/nchs/nhanes/Default.aspx)
+
+This study first ensured that samples missing target variables and those whose dietary habits could not be published because of privacy policies were removed. 
+This is followed by a simplified reclassification of a large variety of character-based variables, such as time of going to sleep, time of waking up, as well as education and marital status.The cleaned dataset encompasses various features related to dietary habits, vitamin intake, micronutrient intake, lifestyle routines, as well as fundamental demographic and health statistics.This dataset comprises 137 features, 3 target variables, and 47,291 samples. Among these, there are 28 categorical attributes, two labels (survival status and cause of death), and 106 numerical features, with one label (survival days). The dataset includes a total of 667,002 missing values. It encompasses categorical data (e.g., ex.status, leading, gender, education), ordinal data (e.g., ex.snore, stop breathing), and ratio data types (e.g., ex.v_total, g_total, f_total), among others. In terms of the target variable, there is a sample imbalance in the dataset, with a positive to negative sample ratio of approximately 1:5.6.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+if (KNIT) {
+library(nhanesR)
+fped_MORT0 <- db_demo(years = 1999:2020, 
+                      ageyr = "Age",
+                      sex = "Sex",
+                      eth1 = "Eth",
+                      edu = "Edu", 
+                      marital = "Marital",
+                      poverty = "Poverty",
+                      Year = T,
+                      ) |> #1. demographic factors
+              diag_smoke() |> 
+              diag_alcohol.user() |> 
+              db_bodyMeasure(BMI_kg.m2 = "BMI") |> 
+              #diag_DM() |> 
+              diag_Hypertension() |> 
+              diag_Hyperlipidemia() |> 
+              db_HemalBiochemistry(hdl_cholesterol_mmol.L = "HDL-C",
+                                   ldl_cholesterol_mmol.L = "LDL-C",
+                                  # C_reactive_protein_mg.dl = "C-reactive protein"
+                                    ) |> 
+              dex_PhysicalActivity(all.5 = T,   
+                         activity = T,
+                         MET = T,
+                         time = T,
+                         direction = "m")  |>  
+              diag_congestive.heart.failure() |> 
+              diag_coronary.heart.disease() |> 
+              diag_angina() |> 
+              diag_heart.attack() |> 
+              diag_stroke() |> 
+              db_mort(varLabel = F)
+tsv_cancer <-  nhs_tsv('mcq')
+cancer<- nhs_read(tsv_cancer,"MCQ220:cancer",
+                  # lower_cd = T,   
+                  Year = F) 
+fped_MORT1 <- Left_Join(fped_MORT0,cancer)
+
+tsv_sedentary <- nhs_tsv('paq')
+sedentary <- nhs_read(tsv_sedentary,"PAD680:sedentary",Year = F)
+fped_MORT1 <- Left_Join(fped_MORT1,sedentary)
+table(fped_MORT1$sedentary)
+
+tsv_health_status <-  nhs_tsv('huq')
+health_status<- nhs_read(tsv_health_status,"HUQ010:health_status",
+                         # lower_cd = T, 
+                         Year = F) 
+
+
+
+fped_MORT1 <- Left_Join(fped_MORT1,health_status)
+
+tsv_workhour <- nhs_tsv('ocq')
+workhour <- nhs_read(tsv_workhour,"OCQ180:workhour",Year = F)
+fped_MORT1 <- Left_Join(fped_MORT1,workhour)
+tsv_sleep  <- nhs_tsv('slq')
+sleep  <- nhs_read(tsv_sleep,
+                   "SLD010H:sleephour",
+                   # "SLD012:weekdays.sleephour", 
+                   "SLQ300:fall.asleep ",
+                   "SLQ310:wake.up",
+                   "SLQ030:snore",
+                   "SLQ040:stop.breathing",
+                   "SLQ050: trouble.sleeping",
+                   Year = F)
+fped_MORT1 <- Left_Join(fped_MORT1,sleep)
+fped <- db_fped(
+  #data=fped_MORT1, 
+  years = 1999:2020, 
+  day = c(1,2),
+  dietary = "tot",
+  fun = "sum",
+  f_citmlb = TRUE,
+  f_other = TRUE,
+  f_whole = TRUE,
+  f_juice = TRUE,
+  f_total = TRUE,
+  v_drkgr = TRUE,
+  v_redor_tomato = TRUE,
+  v_redor_other = TRUE,
+  v_redor_total = TRUE,
+  v_starchy_potato = TRUE,
+  v_starchy_other = TRUE,
+  v_starchy_total = TRUE,
+  v_other = TRUE,
+  v_total = TRUE,
+  v_legumes = TRUE,
+  g_whole = TRUE,
+  g_refined = TRUE,
+  g_total = TRUE,
+  d_milk = TRUE,
+  d_yogurt = TRUE,
+  d_cheese = TRUE,
+  d_total = TRUE,
+  pf_meat = TRUE,
+  pf_curedmeat = TRUE,
+  pf_organ = TRUE,
+  pf_poult = TRUE,
+  pf_seafd_hi = TRUE,
+  pf_seafd_low = TRUE,
+  pf_mps_total = TRUE,
+  pf_eggs = TRUE,
+  pf_soy = TRUE,
+  pf_nutsds = TRUE,
+  pf_legumes = TRUE,
+  pf_total = TRUE,
+  add_sugars = TRUE,
+  oils = TRUE,
+  solid_fats = TRUE,
+  a_drinks = TRUE,
+  vtotalleg = TRUE,
+  vdrkgrleg = TRUE,
+  pfallprotleg = TRUE,
+  pfseaplantleg = TRUE,
+)
+fped_all <- Left_Join(fped_MORT1,fped)
+drtot<-db_drtot(
+  #data=fped, 
+  years = 1999:2020, 
+  day = 1,
+  fun = "sum",
+  # rstz = FALSE,
+  energy_kcal = TRUE,
+  protein_g = TRUE,
+  carbohydrate_g = TRUE,
+  total_sugars_g = TRUE,
+  dietary_fiber_g = TRUE,
+  total_fat_g = TRUE,
+  total_sfat_g = TRUE,
+  total_mfat_g = TRUE,
+  total_pfat_g = TRUE,
+  cholesterol_mg = TRUE,
+  vitamin_A_rae_mcg = TRUE,
+  retinol_mcg = TRUE,
+  carotene_re.1999 = TRUE,
+  alpha_carotene_mcg = TRUE,
+  beta_carotene_mcg = TRUE,
+  beta_cryptoxanthin_mcg = TRUE,
+  lycopene_mcg = TRUE,
+  lutein_zeaxanthin_mcg = TRUE,
+  thiamin_vitamin_B1_mg = TRUE,
+  riboflavin_vitamin_B2_mg = TRUE,
+  niacin_mg = TRUE,
+  vitamin_B6_mg = TRUE,
+  total_folate_mcg = TRUE,
+  folic_acid_mcg = TRUE,
+  food_folate_mcg = TRUE,
+  folate_dfe_mcg = TRUE,
+  total_choline_mg = TRUE,
+  vitamin_B12_mcg = TRUE,
+  added_vitamin_B12_mcg = TRUE,
+  vitamin_C_mg = TRUE,
+  vitamin_D_d2_d3_mcg = TRUE,
+  vitamin_E_as_alpha_tocopherol_mg = TRUE,
+  added_alpha_tocopherol_vitamin_E_mg = TRUE,
+  vitamin_K_mcg = TRUE,
+  calcium_mg = TRUE,
+  phosphorus_mg = TRUE,
+  magnesium_mg = TRUE,
+  iron_mg = TRUE,
+  zinc_mg = TRUE,
+  copper_mg = TRUE,
+  sodium_mg = TRUE,
+  potassium_mg = TRUE,
+  selenium_mcg = TRUE,
+  caffeine_mg = TRUE,
+  theobromine_mg = TRUE,
+  alcohol_g = TRUE,
+  moisture_g = TRUE,
+  sfa_4.0_butanoic_g = TRUE,
+  sfa_6.0_hexanoic_g = TRUE,
+  water_total_plain_g = TRUE,
+  water_total_tap_g = TRUE,
+  water_total_bottled_g = TRUE,
+  water_plain_carbonated_g = TRUE,
+  salt_type = TRUE,
+  salt_added_frequency = TRUE,
+  #Year = TRUE,
+  both2days = FALSE,
+  join = "left")
+fped_all <- Left_Join(fped_all,drtot)
+fped_export <- drop_row(fped_all,is.na(fped_all$mortstat))
+fped_export <- drop_row(fped_export,is.na(fped_export$f_whole))
+fped_export <- drop_row(fped_export,is.na(fped_export$vitamin_D_d2_d3_mcg))
+fped_export <- drop_row(fped_export,is.na(fped_export$PA_total_time))
+fped_export <- drop_col(fped_export,"eligstat" , "diabetes" , "hyperten", "permth_int","sdmvpsu","sdmvstra","HDL-C","LDL-C")
+fped_export <- fped_export[, !apply(is.na(fped_export), 2, all)]
+fped_export <- fped_export[, apply(fped_export, 2, function(x) length(unique(x)) > 1)]
+col_rename(fped_export) <- c("mortstat:status","permth_exm:time","ucod_leading:leading")###change names
+#path<-file.path("nhanes.csv")
+#write.csv(fped_export,file = path,row.names = FALSE)
+fped_export[fped_export$snore %in% c('Frequently - 5 or more nights a week'), "snore"] <- "Frequently (5 or more nights/week)"
+fped_export[fped_export$snore %in% c('Occasionally - 3-4 nights a week'), "snore"] <-"Occasionally (3-4 nights/week)"
+fped_export[fped_export$snore %in% c('Rarely - 1-2 nights a week'), "snore"] <- "Rarely (1-2 nights/week)"
+fped_export[fped_export$stop.breathing %in% c('Frequently - 5 or more nights a week'), "stop.breathing"] <- "Frequently (5 or more nights/week)"
+fped_export[fped_export$stop.breathing %in% c('Occasionally - 3-4 nights a week'), "stop.breathing"] <-"Occasionally (3-4 nights/week)"
+fped_export[fped_export$stop.breathing %in% c('Rarely - 1-2 nights a week'), "stop.breathing"] <- "Rarely (1-2 nights/week)"
+
+
+fped_export[fped_export$workhour %in% c('80 Hours or more'), "workhour"] <- 80
+fped_export[fped_export$workhour %in% c('1-5 Hours'), "workhour"] <- 5
+
+
+fped_export[fped_export$health_status%in% c("Excellent","Very good","Good"), "health_status"] <- "good to excellent"
+fped_export[fped_export$health_status %in% c("Fair, or","Poor?"), "health_status"] <-"poor to fair"
+
+fped_export[fped_export$wake.up %in% c("05:00","05:30", "06:00", "06:30", "04:30", "04:10", "05:15", "04:45", "04:00", "05:35","05:45", "06:50", "04:20", "06:40", "06:45", "06:15", "04:15", "04:55", "05:50", "05:40","04:40", "05:03", "05:10", "05:20", "04:35", "06:37", "05:06", "05:27", "06:20", "05:05","04:05", "06:09", "04:50", "06:35", "04:44", "06:05", "04:03", "06:03","06:11", "04:25","06:10", "06:25","05:36", "05:25", "05:55", "06:55"), "wake.up"] <- "wake_up_early"
+
+fped_export[fped_export$wake.up %in% c("08:45","07:50", "07:55", "07:49", "08:00", "08:15", "08:30", "09:00", "09:10", "08:40","07:15", "07:30", "07:20", "07:40", "07:05", "08:50", "09:30", "07:45", "08:20", "07:10","07:00","10:00"), "wake.up"] <-"wake_up_on_time"
+
+fped_export[fped_export$wake.up %in% c("11:00","11:10", "11:30", "12:00", "12:30", "12:45", "11:45", "10:45", "11:59","13:00","10:50", "10:30"),"wake.up"] <-  "wake_up_late"
+
+fped_export[fped_export$wake.up %in% c("21:45", "03:05", "14:15", "14:50", "23:30", "01:30", "21:30", "17:30", "16:30", "20:00","02:45", "17:00", "03:10", "02:40", "14:35", "15:15", "03:15", "03:00", "03:30", "21:00","20:45", "22:30", "19:30", "23:00", "02:44", "03:50", "03:40", "14:00", "01:00", "00:00","13:30", "18:00", "22:00", "01:45", "20:30", "03:35", "21:50", "02:30", "03:45", "02:00","22:20", "14:30", "15:30", "16:00", "15:00", "19:00", "03:20","02:50"),"wake.up"] <-"wake_up_not_normal"
+
+fped_export[fped_export$fall.asleep %in% c('18:00', '18:30', '19:00', '19:30', '19:45', '20:00', '20:03', '20:30', '20:45'), "fall.asleep"] <- "fall_asleep_early"
+fped_export[fped_export$fall.asleep %in% c('23:30', '23:00', '22:30', '21:00', '00:00', '22:00', '21:30', '22:10', '23:13','23:20', '22:45', '23:10',  '21:45', '22:15', '22:03', '23:15', '22:02', '21:50','21:13', '23:05', '21:03', '22:40', '21:10', '21:15', '23:40', '23:45'), "fall.asleep"] <-"fall_asleep_on_time"
+fped_export[fped_export$fall.asleep %in% c('00:20', '00:15', '00:30', '00:45', '01:00', '01:30','01:45', '02:00', '03:00','02:30', '03:45', '03:30'), "fall.asleep"] <- "fall_asleep_late"
+fped_export[fped_export$fall.asleep %in% c('04:30', '04:00', '06:00', '08:00', '09:00', '05:30', '08:15', '07:45','09:30', '09:45', '12:00', '14:00', '11:00', '11:30', '17:30', '14:30','06:30','17:00', '13:00', '10:30', '06:45', '16:00', '12:01','05:00','07:00', '07:30', '08:30', '15:00', '10:00','13:30'), "fall.asleep"] <- "fall_asleep_not_normal"
+
+
+fped_export[fped_export$Edu %in% c("College Graduate or above","More than high school","High School Grad/GED","Some College or AA degree","High School Graduate","GED or Equivalent","High school graduate/GED or equivalent","Some college or AA degree","College graduate or above","High school graduate","GED or equivalent","High School Grad/GED or Equivalent"), "Edu"] <- "Above high school"
+fped_export[fped_export$Edu %in% c("3rd Grade","9-11th Grade (Includes 12th grade with no diploma)","5th Grade","8th Grade","Less Than 9th Grade","7th Grade","11th Grade","1st Grade","9th Grade","6th Grade","Never Attended / Kindergarten Only","12th Grade, No Diploma","10th Grade","4th Grade","2nd Grade","Less Than 5th Grade","8th grade","7th grade","3rd grade","Never attended / kindergarten only","9th grade","10th grade","6th grade","1st grade","9-11th grade (Includes 12th grade with no diploma)","2nd grade","Less than 9th grade","5th grade","4th grade","11th grade","12th grade, no diploma","Less than 5th grade"), "Edu"] <- "Less than high school"
+
+
+
+fped_export[fped_export$Eth %in% c("Other Race - Including Multi-Racial","Other Hispanic"), "Eth"] <- "other"
+fped_export[fped_export$Marital %in% c("Married","Living with partner"), "Marital"] <- "Married or living with a partner"
+fped_export[fped_export$Marital %in% c("Never married","Separated","Divorced","Widowed","Widowed/Divorced/Separated"), "Marital"] <- "Unmarried or other"
+
+fped_export[fped_export$leading %in% c("Alzheimer's disease (G30)"), "leading"] <- "AD-Specific"
+fped_export[fped_export$leading %in% c('Diseases of heart (I00-I09, I11, I13, I20-I51)'), "leading"] <- "HD-Specific"
+fped_export[fped_export$leading %in% c('Chronic lower respiratory diseases (J40-J47)'), "leading"] <- "CRD-Specific"
+fped_export[fped_export$leading %in% c('Malignant neoplasms (C00-C97)'), "leading"] <- "Cancer-Specific"
+fped_export[fped_export$leading %in% c('Cerebrovascular diseases (I60-I69)'), "leading"] <- "CVD-Specific"
+fped_export[fped_export$leading %in% c('Accidents (unintentional injuries) (V01-X59, Y85-Y86)',"All other causes (residual)"), "leading"] <- "Other"
+fped_export[fped_export$leading %in% c('Diabetes mellitus (E10-E14)'), "leading"] <- "DM-Specific"
+fped_export[fped_export$leading %in% c('Influenza and pneumonia (J09-J18)'), "leading"] <- "I&P-Specific"
+fped_export[fped_export$leading %in% c('Nephritis, nephrotic syndrome and nephrosis (N00-N07, N17-N19, N25-N27)'), "leading"] <- "RD-Specific"
+
+fped_export[fped_export$salt_type %in% c('Salt substitute','Lite salt'), "salt_type"] <- "Other"
+
+
+path<-file.path("nhanes_after_clean.csv")
+write.csv(fped_export,file = path)
+
+}
+```
+
+### 1.3 Data Preprocessing
+
+To further deal with nulls, when a column has a missing value greater than 50%, this means that filling this column may introduce errors in training, so this column is removed. When a column has less than 10% missing values, this means that deleting this column with missing samples does not unduly affect the amount of data, so the corresponding samples are removed. After that there were three variables left that were not deleted. They are working hours, sleeping hours & salt habits.
+By looking at the data it can be seen that the samples with missing salt habits are all samples that have selected no in the other column of whether they use salt or not, so it can be concluded that the samples with missing salt habit features are not using salt, and therefore can be uniformly filled in with additional characters. Working time and sleep time can be filled in with values recommended by some research **(Hirshkowitz, 2015)** and health organisations (https://www.dol.gov/agencies/whd/flsa). (40 hours of work per week and 8 hours of rest per day)
+In order to avoid that the unique heat coding that comes with some models will give some binary variables to the unique heat coding causing feature redundancy, so the binary variables are coded 0-1. After that, integer coding is applied to some fixed-order variables.
+Since it is possible to work backwards from time to death and time to survival to whether the sample survived or not, these two metrics should be removed from the final modelling.
+Such data processing completely cleans out vacancies, increasing the robustness of the data, but it also cleans out a large number of dead samples, exacerbating data imbalances. The final number of positive and negative samples in the remaining 16,223 samples was 1104:15,219, and 109 columns were retained.
+
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+data=read.csv("nhanes_after_clean.csv")
+data <- data[, !(names(data) %in% c("seqn", "leading", "time","X"))]
+
+
+missing_percentage <- sapply(data, function(col) sum(is.na(col)) / length(col))
+cols_to_check <- names(missing_percentage[missing_percentage < 0.10])
+data <- data[complete.cases(data[, cols_to_check]), ]
+
+missing_percentage <- sapply(data, function(col) sum(is.na(col)) / length(col))
+cols_to_remove <- names(missing_percentage[missing_percentage > 0.50])
+data <- data[, !(names(data) %in% cols_to_remove)]
+
+data$salt_added_frequency[is.na(data$salt_added_frequency)] <- "Never"
+data$sleephour[is.na(data$sleephour)] <- 8
+data$workhour[is.na(data$workhour)] <-40
+
+data$status <- recode(data$status, 
+                  `Assumed alive` = 1, 
+                   `Assumed deceased` = 0)
+# For Edu column
+data$Edu <- recode(data$Edu, 
+                  `Above high school` = 1, 
+                   `Less than high school` = 0)
+
+data$health_status <- recode(data$health_status, 
+                  `good to excellent` = 1, 
+                   `poor to fair` = 0)
+# For Sex column
+data$Sex <- recode(data$Sex, 
+                   `Male` = 0, 
+                   `Female` = 1)
+# For Marital column
+data$Marital <- recode(data$Marital, 
+                       `Married or living with a partner` = 1, 
+                       `Unmarried or other` = 0)
+# For Year column
+data$Year <- recode(data$Year, 
+                    `2007-2008` = 0, 
+                    `2009-2010` = 1,
+                    `2011-2012` = 2, 
+                    `2013-2014` = 3, 
+                    `2015-2016` = 4, 
+                    `2017-2018` = 5)
+
+# For alcohol.user column
+data$alcohol.user <- recode(data$alcohol.user, 
+                            `never` = 0,
+                            `former` = 1,
+                            `mild` = 2,
+                            `moderate` = 3,
+                            `heavy` = 4)
+# For smoke column
+data$smoke <- recode(data$smoke, 
+                     `never` = 0,
+                     `former` = 1,
+                     `now` = 2)
+
+data$salt_type <- recode(data$salt_type, 
+                     `Doesn't use or add salt products at the table` = 0,
+                     `Other` = 1,
+                     `Ordinary salt [includes regular iodized salt, sea salt and seasoning salts made with regular salt]` = 2)
+
+data$salt_added_frequency <- recode(data$salt_added_frequency,
+                            'Never' = 0, 
+                            'Rarely' = 1, 
+                            'Occasionally' = 2, 
+                            'Very often' = 3)
+
+data$work.activity <- recode(data$work.activity,
+                            'no' = 0, 
+                            'moderate' = 1, 
+                            'vigorous' = 2, 
+                            'both' = 3)
+
+data$recreational.activity <- recode(data$recreational.activity,
+                                    'no' = 0,
+                                    'moderate' = 1,
+                                    'vigorous' = 2, 
+                                    'both' = 3)
+data <- dummy_cols(data, select_columns = "Eth", remove_selected_columns = TRUE)
+
+data[] <- lapply(data, function(x) {
+  if (is.character(x) || is.factor(x)) {
+    x[tolower(x) == "yes"] <- 1
+    x[tolower(x) == "no"] <- 0
+  }
+  return(x)
+})
+status_column <- data$status
+data$status <- NULL
+data$status <- status_column
+path<-file.path("train.csv")
+write.csv(data,file = path)
+
+```
+
+### 1.4 Feature engineering
+
+#### 1.4.1 PCA
+
+PCA can reduce the dimensionality of a dataset while retaining much of the variation in the original data. This helps to simplify the model, reduce computational costs, and potentially improve the generalisation of the model. At the same time, PCA can reduce high-dimensional data to 2 or 3 dimensions, which helps to visualise the structure and patterns of the data. In order to avoid data leakage, which is the involvement of test data in the processing of training data, therefore, principal component analysis is performed in this study only after the dataset partitioning.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+data <- read.csv("train.csv")
+columns_of_interest <- c("Year","Age","Marital","Poverty","BMI","PA_total_time","PA_total_MET","sedentary","health_status","workhour","sleephour","trouble.sleeping","f_citmlb","f_other","f_whole","f_juice","f_total","v_drkgr","v_redor_tomato","v_redor_other","v_redor_total","v_starchy_potato","v_starchy_other","v_starchy_total","v_other","v_total","v_legumes","g_whole","g_refined","g_total","d_milk","d_yogurt","d_cheese","d_total","pf_meat","pf_curedmeat","pf_organ","pf_poult","pf_seafd_hi","pf_seafd_low","pf_mps_total","pf_eggs","pf_soy","pf_nutsds","pf_legumes","pf_total","add_sugars","oils","solid_fats","a_drinks","vtotalleg","vdrkgrleg","pfallprotleg","pfseaplantleg","energy_kcal","protein_g","carbohydrate_g","total_sugars_g","dietary_fiber_g","total_fat_g","total_sfat_g","total_mfat_g","total_pfat_g","cholesterol_mg","vitamin_A_rae_mcg","retinol_mcg","alpha_carotene_mcg","beta_carotene_mcg","beta_cryptoxanthin_mcg","lycopene_mcg","lutein_zeaxanthin_mcg","thiamin_vitamin_B1_mg","riboflavin_vitamin_B2_mg","niacin_mg","vitamin_B6_mg","total_folate_mcg","folic_acid_mcg","food_folate_mcg","folate_dfe_mcg","total_choline_mg","vitamin_B12_mcg","added_vitamin_B12_mcg","vitamin_C_mg","vitamin_D_d2_d3_mcg","vitamin_E_as_alpha_tocopherol_mg","added_alpha_tocopherol_vitamin_E_mg","vitamin_K_mcg","calcium_mg","phosphorus_mg","magnesium_mg","iron_mg","zinc_mg","copper_mg","sodium_mg","potassium_mg","selenium_mcg","caffeine_mg","theobromine_mg","alcohol_g","moisture_g","sfa_4.0_butanoic_g","sfa_6.0_hexanoic_g","water_total_plain_g","water_total_tap_g","water_total_bottled_g","salt_type","salt_added_frequency")
+
+
+numeric_data1<- data[, columns_of_interest]
+# PCA
+pca_result <- prcomp(numeric_data1, center = TRUE,scale. = TRUE)
+
+# PCA plot in 3D
+numeric_data1_pca_3d <- data.frame(
+  PC1 = pca_result$x[, 1],
+  PC2 = pca_result$x[, 2],
+  PC3 = pca_result$x[, 3],
+  status = data$status  # Assuming 'status' is a column in your data. If not, replace with the appropriate column name.
+)
+
+pca.plot_3d <- plot_ly(
+  data = numeric_data1_pca_3d,
+  x = ~PC1,
+  y = ~PC2,
+  z = ~PC3,
+  color = ~status,
+
+
+    colors = colorRamp(c("midnightblue", "lightblue")),
+
+
+
+  type = "scatter3d",
+  mode = "markers"
+) %>%
+  layout(
+    scene = list(
+      xaxis = list(title = "PC1"),
+      yaxis = list(title = "PC2"),
+      zaxis = list(title = "PC3")
+    ),
+    title = "3D PCA Plot"
+  )
+
+explained_var <- pca_result$sdev^2 / sum(pca_result$sdev^2)
+
+# Cumulative variance explained
+cum_var <- cumsum(explained_var)
+
+# Create bar plot for variance explained by each principal component
+ggplot(data.frame(PC=1:length(explained_var), Variance=explained_var), aes(x=PC, y=Variance)) +
+  geom_bar(stat="identity") +
+  labs(title="Elbow plot", x="Principal Component", y="Variance Explained") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face="bold"))
+pca.plot_3d
+
+```
+
+<center>
+  <img src="PCA.png" alt="emblem" width="550" height="320">
+</center>
+
+
+#### 1.4.2 Balanced oversampling and class weights
+
+Balanced oversampling and class weighting can well reduce the overfitting caused by sample imbalance, in order to avoid data leakage, this study still carries out balanced oversampling or class weighting after the data have been divided.
+
+## 2 EDA and Visualization
+
+### 2.1 Stacked Column Chart
+
+The histogram compares the distribution of the three nutrients g_whole, d_total and v_total in the three characteristic columns for the different leading categories, i.e., the distribution of the values for the different dietary intake profiles for the different causes of death. People who don't eat grains and eat fewer vegetables make up a larger percentage of those who die of the disease.
+
+
+```{r fig.width=18, fig.height=10,eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+data=read.csv("nhanes_after_clean.csv")
+dataplot <- data[data$leading != 'NA',]
+
+# Create your first graph
+plot1 <- dataplot %>%
+  ggplot(aes(x = g_whole, fill = leading)) +
+  geom_histogram(color = "white", alpha = 0.6) +
+  theme_bw() +
+
+  coord_cartesian(xlim = c(0, 8))
+
+plot2 <- dataplot %>%
+  ggplot(aes(x = d_total, fill = leading)) +
+  geom_histogram(color = "white", alpha = 0.6) +
+  theme_bw() +
+
+  coord_cartesian(xlim = c(0, 8))
+
+plot3 <- dataplot %>%
+  ggplot(aes(x = v_total, fill = leading)) +
+  geom_histogram(color = "white", alpha = 0.6) +
+  theme_bw() +
+
+  coord_cartesian(xlim = c(0, 8))
+
+# Merge three charts
+final_plot <- plot1 + plot2 + plot3 +
+  plot_layout(nrow = 1) +
+  guides(fill = guide_legend(override.aes = list(alpha = 1)))  # 保持共同图例的透明度
+
+# Create a title for the entire graph
+title_plot <- ggdraw() +
+  draw_label("Columnar Stacked Plot of Eating Habits", fontface = 'bold', size = 20)
+
+# Display final graphics
+# Merge titles and graphs using the cowplot package
+plot_grid(title_plot, final_plot, ncol = 1, rel_heights = c(0.1, 0.9))
+```
+
+### 2.2 Peak Plot/Boxplot
+
+Density spine plots represent the distribution of numerical continuous data, BMI, over multiple categorical target columns, leading, by stacking a series of density curves on two axes, where the x-axis represents the BMI value, i.e., the respondent's body mass index.
+The x-axis represents the BMI value, i.e., the respondent's body mass index.
+y-axis represents the leading, i.e., the cause of death, and each filled color represents a different leading category, i.e., a different cause of death.
+In the figure, the peak density of BMI is concentrated at 25.And people who die from diabetes and heart disease can be found to have higher BMIs.
+
+The line box plots in the figure count the range of data distribution and central tendency for different eating habit characteristics. We normalized these data for ease of visualization.It can be noted that the general public varies widely in their intake habits of solid fats and oils
+
+```{r fig.width=15, fig.height=6,eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+plot1 <- {
+  data %>%
+    filter(!is.na(BMI), !is.na(leading)) %>%  
+    ggplot(aes(x = BMI, y = leading, fill = leading)) +
+    geom_density_ridges(alpha = 0.6) +
+    theme_ridges() +
+    scale_x_continuous(expand = expansion(add = c(0.05, 0.05))) + 
+    ggtitle("Peak Plot of BMI on Various Causes of Death") +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      axis.title.x = element_text(hjust = 0.5), 
+      axis.title.y = element_blank()  
+    )
+}
+
+plot2 <- {
+# Corrected feature names
+features <- c('f_total', 'v_drkgr','v_redor_total', 'v_starchy_total', 'v_other', 'v_legumes','g_total', 'd_total', 'pf_mps_total','pf_eggs', 'pf_nutsds','pf_legumes','add_sugars', 'oils', 'solid_fats')
+
+# Extract the relevant columns
+selected_data <- data[, features]
+
+# Normalize the data using Min-Max scaling
+normalized_data <- as.data.frame(scale(selected_data, center = FALSE, scale = apply(selected_data, 2, function(x) max(x) - min(x))))
+  long_data <- gather(normalized_data, key = "Feature", value = "Value")
+  long_data <- na.omit(long_data)
+  
+  my_colors <- c("#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+                 "#DEA5A4", "#CFCFC4", "#AEC6CF", "#F49AC2", "#9DE093")
+  
+  ggplot(long_data, aes(x = Feature, y = Value, fill = Feature)) +
+    geom_boxplot(outlier.shape = NA) +
+    coord_cartesian(ylim = c(0, 0.3)) +
+    scale_fill_manual(values = my_colors) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+    ) +
+    ggtitle("Normalized Multivariate Boxplot of Eating Habit") +
+    xlab("Features") +
+    ylab("Normalized Value") +
+    theme(plot.title = element_text(face = "bold", hjust = 0.5))
+}
+grid.arrange(plot1, plot2, ncol = 2)
+
+```
+
+
+
+### 2.3 Heat Map
+
+The degree of similarity between the different features from small to large is shown by the way the colors are coded from cold to hot. It can be found that micronutrient and vitamin intake does not directly affect survival. But there is a strong correlation between these variables. Some elements and vitamins are always contained in specific foods resulting. It may be necessary to remove the correlations using downscaling methods.
+
+
+```{r fig.width=18, fig.height=8,eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+data <- read.csv("train.csv")
+
+# Extract the columns for micro-elements
+variables1 <- c('calcium_mg', 'phosphorus_mg', 'magnesium_mg', 'iron_mg',
+                'zinc_mg', 'copper_mg', 'sodium_mg', 
+                'potassium_mg', 'selenium_mcg','caffeine_mg', 'theobromine_mg','status')
+micro_elements_data <- data[, variables1]
+
+# Remove rows with NA values
+micro_elements_data <- na.omit(micro_elements_data)
+
+# Create a correlation matrix
+cor_matrix <- cor(micro_elements_data)
+
+
+variables2 <- c('vitamin_A_rae_mcg','thiamin_vitamin_B1_mg', 'riboflavin_vitamin_B2_mg', 'niacin_mg', 'vitamin_B6_mg', 
+                'vitamin_B12_mcg', 'vitamin_C_mg', 'vitamin_E_as_alpha_tocopherol_mg',
+                'added_vitamin_B12_mcg' ,'vitamin_D_d2_d3_mcg','added_alpha_tocopherol_vitamin_E_mg','vitamin_K_mcg','status'
+                )
+                        
+vitamin_data <- data[, variables2]
+
+# Remove rows with NA values
+vitamin_data <- na.omit(vitamin_data)
+
+# Create a correlation matrix
+cor_matrix_vitamin <- cor(vitamin_data)
+
+
+
+# Generate the first heatmap
+my_palette <- colorRampPalette(c("#547297", "#8C9EBA", "#D9E0E7", "#F3DBD6", "#DA8F87","#D54846"))(100)
+
+heatmap1 <- pheatmap(cor_matrix, 
+                     clustering_distance_rows = "euclidean", 
+                     clustering_distance_cols = "euclidean", 
+                     clustering_method = "complete", 
+                     display_numbers = TRUE, 
+                     number_format = "%.2f",
+                     color = my_palette,
+                     angle_col = 315,
+                     main = "Heatmap of Trace Micro-elements",
+                     silent = TRUE
+                    )
+
+
+my_palette <- colorRampPalette(c("#1B5E20", "#FFEB3B", "#B71C1C"))(100)
+
+heatmap2 <- pheatmap(cor_matrix_vitamin, 
+                     clustering_distance_rows = "euclidean", 
+                     clustering_distance_cols = "euclidean", 
+                     clustering_method = "complete", 
+                     display_numbers = TRUE, 
+                     number_format = "%.2f",
+                     color = my_palette,
+                     angle_col = 315,
+                     main = "Heatmap of Vitamin Correlation",
+                     silent = TRUE
+                  
+                
+                    )
+
+grid.arrange(heatmap1$gtable, heatmap2$gtable, ncol = 2)
+
+```
+
+
+## 3 Model Selection
+
+Based on the three main categories of models proposed in the first part, this study implements 11 models based on R such as Tabnet, Multi-Layer Perceptron, KNN, LDA, Logistic Regression, Support Vector Machines, Decision Trees, Random Forests, XGBoost, LightGBM, CatBoost, etc. and evaluates them based on the following criteria. And they were evaluated based on the following criteria. Because the minority class (death) is more important than the majority class in this research species, the specificity, F1, AUC, and accuracy metrics were given more importance. In addition to ensure that the selection of optimal parameters is not affected by the division of the dataset, the parameters were adjusted in this study using a five-fold cross-validation framework. And after dividing the data, PCA and oversampling were performed as well as calculating the category weights.
+
+### 3.1 Overall
+
+In the context of overall model performance evaluation, the confusion matrix function provides metrics such as Accuracy, Kappa, McNemar's P-Value, etc.
+Among these, Accuracy represents the ratio of correctly predicted samples to the total number of samples.
+Kappa is a measure of the agreement between classification accuracy and chance agreement.
+Overall, these two metrics can serve as standards for assessing model performance.
+
+### 3.2 Byclass
+
+In the context of evaluating model performance for the purpose of model selection, the confusion matrix function provides several key evaluation metrics such as Sensitivity, Specificity, Precision, Negative Predictive Value, Balanced Accuracy, and more.
+Sensitivity represents the True Positive Rate, which is the proportion of correctly identified positive cases out of all actual positive cases.
+Balanced Accuracy indicates an equilibrium between True Positive Rate and True Negative Rate, serving as an average measure of overall accuracy.
+Additionally, the F1-Score, although not directly available from the confusion matrix, is a critical metric in model evaluation.
+It represents the harmonic mean of Precision and Recall and is particularly useful for imbalanced datasets.
+AUC (Area Under the Curve) is another important metric derived from the ROC (Receiver Operating Characteristic) curve.
+It provides a single numeric summary of the overall performance of a classification model.
+An AUC of 1 signifies a perfect classifier, while AUC values between 0.5 and 1 indicate varying degrees of classifier performance better than random guessing.
+An AUC of 0.5 implies a classifier that performs no better than random guessing, and AUC values below 0.5 represent classifiers worse than random guessing.
+A notable advantage of AUC is its independence from classification thresholds, making it a robust evaluation metric.
+
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+
+data <- read.csv("train.csv")
+data <- data[, !(names(data) == "X")]
+set.seed(1019)
+trainIndex <- createDataPartition(data$status, p = .8, list = FALSE, times = 1)
+train_data <- data[trainIndex,]
+test_data  <- data[-trainIndex,]
+
+```
+
+```{r warning=FALSE, results='hide',eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+KNIT=FALSE
+if (KNIT) {
+#LDA
+set.seed(1019)
+pca <- prcomp(train_data[, -which(names(train_data) == "status")], center = TRUE, scale. = TRUE)
+var_explained <- cumsum(pca$sdev^2 / sum(pca$sdev^2))
+num_components <- which(var_explained >= 1)[1]
+
+train_pca <- pca$x[, 1:num_components]
+test_pca <- predict(pca, test_data[, -which(names(test_data) == "status")])[, 1:num_components]
+lda_model <- lda(as.factor(status) ~ ., data = data.frame(status = train_data$status, train_pca))
+lda_predictions <- predict(lda_model, data.frame(test_pca))
+cm_lda <- confusionMatrix(lda_predictions$class, as.factor(test_data$status))
+print("1-LDA")
+print(cm_lda$overall['Accuracy'])
+print(cm_lda$byClass['F1'])
+
+
+# RF
+class_weights <- ifelse(table(train_data$status) == 0, 
+                        1, 
+                        sum(train_data$status == 0) / sum(train_data$status == 1))
+rf_model <- randomForest(status ~ ., data = train_data, ntree = 30, classwt = class_weights)
+preds <- predict(rf_model, test_data)
+preds <- ifelse(preds > 0.5, 1, 0)
+cm_rf <- confusionMatrix(as.factor(preds), as.factor(test_data$status))
+print("2-RF")
+print(cm_rf$overall['Accuracy'])
+print(cm_rf$byClass['F1'])
+
+###DT
+weights <- ifelse(train_data$status == 0, 1,sum(train_data$status == 0) / sum(train_data$status == 1))
+tree_model <- rpart(status ~ ., data = train_data, method = "class",weights = weights)
+preds <- predict(tree_model, test_data, type = "class")
+cm_tree <- confusionMatrix(as.factor(preds), as.factor(test_data$status))
+print("3-DT")
+print(cm_tree$overall['Accuracy'])
+print(cm_tree$byClass['F1'])
+importance <- tree_model$variable.importance
+top_importance <- head(sort(importance, decreasing = TRUE), 20)
+top_importance <- sort(top_importance)
+par(mar=c(5, 10, 4, 2))
+barplot(top_importance, las=1, main="Top 20 Feature Importance", horiz=TRUE, cex.names=0.7)
+
+# MLP
+set.seed(1019)
+pca <- prcomp(train_data[, -which(names(train_data) == "status")], center = TRUE, scale. = TRUE)
+train_pca <- pca$x[, 1:which(cumsum(pca$sdev^2 / sum(pca$sdev^2)) >= 0.95)[1]]
+test_pca <- predict(pca, test_data[, -which(names(test_data) == "status")])[, 1:which(cumsum(pca$sdev^2 / sum(pca$sdev^2)) >= 0.95)[1]]
+model <- nnet(as.factor(status) ~ ., data = data.frame(status = train_data$status, train_pca), size = 13, maxit = 200,trace = FALSE)
+predictions <- predict(model, newdata = data.frame(test_pca), type = "raw")
+predictions_class <- ifelse(predictions > 0.5, 1, 0)  # 选择预测概率大于0.5的类别
+cm_mlp <- confusionMatrix(as.factor(predictions_class), as.factor(test_data$status))
+print("4-MLP")
+print(cm_mlp$overall['Accuracy'])
+print(cm_mlp$byClass['F1'])
+
+### KNN
+set.seed(5003)
+pca <- prcomp(train_data[, -which(names(train_data) == "status")], center = TRUE, scale. = TRUE)
+var_explained <- cumsum(pca$sdev^2 / sum(pca$sdev^2))
+num_components <- which(var_explained >= 0.99)[1]
+train_pca <- pca$x[, 1:num_components]
+test_pca <- predict(pca, test_data[, -which(names(test_data) == "status")])[, 1:num_components]
+k_value <- 2
+knn_predictions <- knn(train = data.frame(train_pca), test = data.frame(test_pca), cl = train_data$status, 
+                       k = k_value)
+cm_knn <- confusionMatrix(knn_predictions, as.factor(test_data$status))
+print("5-KNN")
+print(cm_knn$overall['Accuracy'])
+print(cm_knn$byClass['F1'])
+
+
+###SVM
+class_weights <- table(train_data$status)
+class_weights <- 1 / class_weights
+class_weights <- class_weights / sum(class_weights)
+pca <- prcomp(train_data[, -which(names(train_data) == "status")], center = TRUE, scale. = TRUE)
+var_explained <- cumsum(pca$sdev^2 / sum(pca$sdev^2))
+num_components <- which(var_explained >= 0.85)[1]
+train_pca <- pca$x[, 1:num_components]
+test_pca <- predict(pca, test_data[, -which(names(test_data) == "status")])[, 1:num_components]
+svm_model <- svm(as.factor(status) ~ ., data = data.frame(status = train_data$status, train_pca), kernel =  "polynomial",class.weights = class_weights)
+svm_predictions <- predict(svm_model, data.frame(test_pca))
+cm_svm<- confusionMatrix(svm_predictions, as.factor(test_data$status))
+print("6-SVM")
+print(cm_svm$overall['Accuracy'])
+print(cm_svm$byClass['F1'])
+
+###LR
+class_counts <- table(train_data$status)
+class_weights <- max(class_counts) / class_counts
+pca <- prcomp(train_data[, -which(names(train_data) == "status")], center = TRUE, scale. = TRUE)
+var_explained <- cumsum(pca$sdev^2 / sum(pca$sdev^2))
+num_components <- which(var_explained >= 1)[1]
+train_pca <- pca$x[, 1:num_components]
+test_pca <- predict(pca, test_data[, -which(names(test_data) == "status")])[, 1:num_components]
+weighted_logistic_model <- glm(status ~ ., data = data.frame(status = train_data$status, train_pca), 
+                              family = binomial(), weights = rep(class_weights, times = table(train_data$status)))
+predictions <- predict(weighted_logistic_model, newdata = data.frame(test_pca), type = "response")
+predictions <- ifelse(predictions > 0.5, 1, 0)
+cm_lr <- confusionMatrix(as.factor(predictions), as.factor(test_data$status))
+print("7-LR")
+print(cm_lr$overall['Accuracy'])
+print(cm_lr$byClass['F1'])
+
+# XGBOOST
+pos_weight <- sum(train_data$status == 0) / sum(train_data$status == 1)
+print(dim(train_data))
+train_matrix <- xgb.DMatrix(data = as.matrix(train_data[, !(names(train_data) == "status")]), label = train_data$status)
+test_matrix <- xgb.DMatrix(data = as.matrix(test_data[, !(names(test_data) == "status")]), label = test_data$status)
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "logloss",
+  eta = 0.1,
+  max_depth = 8
+  )
+model <- xgb.train(params = params, 
+                   data = train_matrix, 
+                   scale_pos_weight = pos_weight,
+                   nrounds = 200,
+                   verbose=FALSE
+                   )
+preds <- predict(model, test_matrix)
+predicted_labels <- ifelse(preds > 0.5, 1, 0)
+cm_xgb <- confusionMatrix(as.factor(predicted_labels), as.factor(test_data$status))
+print("8-XGB")
+print(cm_xgb$overall['Accuracy'])
+print(cm_xgb$byClass['F1'])
+mat <- xgb.importance(feature_names = model$feature_names, model = model)
+xgb.plot.importance(importance_matrix = mat[1:20])
+
+
+
+params <- list(
+  objective = "binary",
+  metric = "binary_logloss",
+  scale_pos_weight = pos_weight,
+  learning_rate = 0.05,
+  max_depth = 6
+)
+dtrain <- lgb.Dataset(as.matrix(train_data[, !(names(train_data) == "status")]), label = train_data$status)
+model <- lgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 200,
+  verbose=-1
+)
+preds <- predict(model, as.matrix(test_data[, !(names(test_data) == "status")]))
+predicted_labels <- ifelse(preds > 0.5, 1, 0)
+cm_lgb <- confusionMatrix(as.factor(predicted_labels), as.factor(test_data$status))
+print("9-LGBM")
+print(cm_lgb$overall['Accuracy'])
+print(cm_lgb$byClass['F1'])
+feature_importance <- lgb.importance(model, percentage = TRUE)
+lgb.plot.importance(feature_importance, top_n = 20, measure = NULL)
+
+
+class_weights <- c(1, sum(train_data$status == 0) / sum(train_data$status == 1))
+train_data_pool <- catboost.load_pool(data = train_data[, !(names(train_data) == "status")], label = train_data$status)
+test_data_pool <- catboost.load_pool(data = test_data[, !(names(test_data) == "status")], label = test_data$status)
+params <- list(
+  iterations = 300,
+  depth = 8,
+  learning_rate = 0.05,
+  loss_function = 'Logloss',
+  custom_metric = list('Accuracy'),
+  eval_metric = 'Accuracy',
+  class_weights = class_weights,
+  verbose = 0 ,
+  task_type = 'GPU'
+)
+model <- catboost.train(train_data_pool, params = params)
+preds <- catboost.predict(model, test_data_pool, prediction_type = 'Class')
+cm_cat <- confusionMatrix(as.factor(preds), as.factor(test_data$status))
+preds_pro <- catboost.predict(model, test_data_pool, prediction_type = 'Probability')
+print("10-Catboost")
+print(cm_cat$overall['Accuracy'])
+print(cm_cat$byClass['F1'])
+
+
+###Tabnet
+set.seed(1019)
+train_data <- ROSE(status ~ ., data = train_data,p=0.5,N = 20000)$data
+# TabNet model
+train_data_x=train_data[, -which(names(train_data) == "status")]
+test_data_x=test_data[, -which(names(test_data) == "status")]
+tabnet_model <- tabnet_fit(train_data_x, train_data$status, epochs = 10,batch_size=128,verbose = FALSE)
+predictions <- predict(tabnet_model, test_data_x)
+# Convert the predictions to class labels
+predictions_class <- ifelse(predictions > 0.5, 1, 0)
+print("11-TabNet")
+cm_tab <- confusionMatrix(as.factor(predictions_class), as.factor(test_data$status))
+print(cm_tab$overall['Accuracy'])
+print(cm_tab$byClass['F1'])
+
+calculate_F1 <- function(cm) {
+  precision <- cm$byClass['Pos Pred Value']
+  recall <- cm$byClass['Recall']
+  f1 <- 2 * (precision * recall) / (precision + recall)
+  return(f1)
+}
+
+extract_metrics <- function(cm, model_name) {
+  data.frame(
+    Model = model_name,
+    Metric = c('Accuracy', 'Recall', 'F1'),
+    Score = c(cm$overall['Accuracy'], cm$byClass['Recall'], cm$byClass['F1'])
+  )
+}
+
+metrics <- rbind(
+  extract_metrics(cm_cat, 'CAT'),
+  extract_metrics(cm_xgb, 'XGB'),
+  extract_metrics(cm_lgb, 'LGB'),
+  extract_metrics(cm_rf, 'RF'),
+  extract_metrics(cm_tree, 'DT'),
+  extract_metrics(cm_knn, 'KNN'),
+  extract_metrics(cm_lda, 'LDA'),
+  extract_metrics(cm_lr, 'LR'),
+  extract_metrics(cm_svm, 'SVM'),
+  extract_metrics(cm_tab, 'TAB'),
+  extract_metrics(cm_mlp, 'MLP')
+)
+print(metrics)
+write.csv(metrics, "metrics.csv", row.names = FALSE)
+}
+```
+
+
+### 3.3 Base Model Comparison
+This study compares the important performance of these algorithms and finds that the integrated tree model is the best, the classical model is the second best, and neural networks are the worst because of their tendency to overfit to survival classes. We focus on reporting the tuning effects of five models: Catboost, XGBoost, LDA, LR, and SVM.
+
+
+```{r fig.width=18, fig.height=8,eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+
+metrics <- read.csv("metrics.csv")
+p1 <- ggplot(subset(metrics, Metric == "Accuracy"), aes(x = Model, y = Score, fill = Model)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  labs(y = "Accuracy", x = "Model") +
+  theme_minimal() +
+  scale_fill_brewer(palette="Set3") +
+  scale_x_discrete(limits = c('CAT', 'XGB', 'LGB', 'RF', 'DT', 'KNN', 'LDA', 'LR', 'SVM', 'TAB', 'MLP'))
+
+
+p2 <- ggplot(subset(metrics, Metric == "Recall"), aes(x = Model, y = Score, fill = Model)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  labs(y = "Recall", x = "Model") +
+  theme_minimal() +
+  scale_fill_brewer(palette="Set3") +
+  scale_x_discrete(limits = c('CAT', 'XGB', 'LGB', 'RF', 'DT', 'KNN', 'LDA', 'LR', 'SVM', 'TAB', 'MLP'))
+
+
+p3 <- ggplot(subset(metrics, Metric == "F1"), aes(x = Model, y = Score, fill = Model)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  labs(y = "F1 Score", x = "Model") +
+  theme_minimal() +
+  scale_fill_brewer(palette="Set3") +
+  scale_x_discrete(limits = c('CAT', 'XGB', 'LGB', 'RF', 'DT', 'KNN', 'LDA', 'LR', 'SVM', 'TAB', 'MLP'))
+grid.arrange(p1, p2, p3,ncol = 3,top = textGrob("Model Performance Comparsion",gp = gpar(fontface = "bold", fontsize = 24)))
+
+
+```
+
+## 4.Modeling
+
+This study performs extensive parameter tuning for each of the models below, but is limited by run time to show only a small portion of them.
+```{r}
+
+print_confusion_matrix_list <- function(conf_matrix) {
+  # Extracting statistics from confusion matrix
+  stats_names <- c("Accuracy", "F1", "Kappa", "Recall", "Precision", "Specificity")
+  
+  stats_values <- c(
+    conf_matrix$overall['Accuracy'],
+    conf_matrix$byClass['F1'],
+    conf_matrix$overall['Kappa'],
+    conf_matrix$byClass['Sensitivity'], # Recall or Sensitivity
+    conf_matrix$byClass['Pos Pred Value'], # Precision
+    conf_matrix$byClass['Specificity']
+  )
+  
+  # Determine max length for formatting
+  max_length <- max(nchar(stats_names))
+  
+  # Print the stats names
+  for (name in stats_names) {
+    cat(sprintf("%-*s", max_length, name), "\t")
+  }
+  cat("\n")
+  # Print the stats values with controlled spacing
+  for (value in stats_values) {
+    cat(sprintf("%-*s", max_length, round(value, 3)), "\t")
+  }
+  cat("\n")
+}
+```
+
+### 4.1 SVM
+
+The core idea behind a support vector machine is to find an optimal hyperplane that maximizes the margin between the support vectors and the hyperplane, effectively dividing the samples into two classes in space. This optimization process involves solving quadratic programming equations, and when dealing with non-linear data, the kernel trick is employed to transform the data into a space where it becomes linearly separable. This margin maximization ensures the model's robust generalization on unseen data, thus mitigating the risk of overfitting  **(Cortes & Vapnik, 1995)**. Furthermore, SVM is resilient to minor data perturbations and is less susceptible to the high-dimensional.Its adaptability is further underscored by the use of different kernel functions, such as Polynomial, Radial Basis Function (RBF), and Sigmoid, allowing SVM to discern intricate patterns in diverse data distributions**(Wang,2015)**.
+
+#### Girdsearch
+
+To optimize the performance of our model, the SVM model requires careful parameter tuning.
+
+**Kernel:** the type of kernel function. The kernel function is used to map the data from the input space to a high-dimensional feature space, thus allowing the SVM to find the optimal hyperplane in the feature space. (Default value: 'radial' (radial basis kernel function)).
+
+**degree:** the number of polynomial kernels. Only applicable if kernel equals "polynomial". (Default value: 3).
+
+**gamma:** parameter required by all kernels, except linear. (Default value: 1 / (data dimension)).
+
+**cost:** cost of constraints violation, it is the ‘C’-constant of the regularization term in the Lagrange formulation. (Default value: 1).
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+### SVM
+data <- read.csv("train.csv")
+data <- data[, !(names(data) == "X")]
+set.seed(1019)
+KNIT=FALSE
+if (KNIT) {
+train_indices <- createDataPartition(data$status, p = 0.8, list = FALSE)
+train_data_all <- data[train_indices, ]
+test_data <- data[-train_indices, ]
+results_df <- data.frame(cost=double(), gamma=double(),degree=double(), mean_F1=double())
+record_acc <- list()
+record_param <- list()
+
+
+costs <- c(1,2,3,4,5,6,7,8,9,10)
+gammas <- c('none',0.01,0.001)
+degrees <- c(1,2,3,4)
+folds <- createFolds(train_data_all$status, k = 5, list = TRUE)
+for (g in gammas){
+  for (d in degrees){
+      for (c in costs) {
+        acc <- list()
+        for(i in 1:5) {
+          # 获取当前的训练集和验证集
+          train_data <- train_data_all[-folds[[i]], ]
+          val_data <- train_data_all[folds[[i]], ]
+    
+          # 计算类权重以处理不平衡数据
+          class_weights <- table(train_data$status)
+          class_weights <- 1 / class_weights
+          class_weights <- class_weights / sum(class_weights)
+    
+          # 使用PCA进行降维处理
+          pca <- prcomp(train_data[, -which(names(train_data) == "status")], center = TRUE, scale. = TRUE)
+          var_explained <- cumsum(pca$sdev^2 / sum(pca$sdev^2))
+          num_components <- which(var_explained >= 0.85)[1]
+    
+          train_pca_data <- as.data.frame(pca$x[, 1:num_components])
+          colnames(train_pca_data) <- paste0("PC", 1:num_components)
+          train_pca_data$status <- train_data$status
+    
+          val_pca_data <- as.data.frame(predict(pca, val_data[, -which(names(val_data) == "status")])[, 1:num_components])
+          colnames(val_pca_data) <- paste0("PC", 1:num_components)
+          val_pca_data$status <- val_data$status
+    
+          # 设置SVM的参数
+          params <- list( cost = c, class.weights = class_weights, decision.values = TRUE,degree=d,gamma=g)
+    
+          # 使用参数列表来训练SVM模型
+          svm_model <- svm(as.factor(status) ~ ., data = train_pca_data, 
+                           kernel = "polynomial", cost = params$cost, 
+                           class.weights = params$class.weights, decision.values = params$decision.values)
+    
+    # 对验证集进行预测
+    preds <- predict(svm_model, newdata = val_pca_data[, -which(names(val_pca_data) == "status")])
+    
+    # 将预测结果和实际值转换为因子，并确保它们具有相同的水平
+    preds <- factor(preds, levels = levels(as.factor(val_data$status)))
+    true_vals <- factor(val_data$status, levels = levels(preds))
+    
+    # 计算混淆矩阵
+    conf_matrix <- confusionMatrix(preds, true_vals)
+          # 记录准确率
+          acc <- c(acc, conf_matrix$byClass['F1'])
+        }
+        
+        # 存储每一个参数组合的平均准确率和参数
+        record_acc <- c(record_acc, mean(unlist(acc)))
+        record_param <- c(record_param, list(params))
+        mean_F1 <- mean(unlist(acc))
+        results_df <- rbind(results_df, data.frame(cost=c, gamma=g,degree=d, mean_F1=mean_F1))
+      }
+    }
+        
+}
+
+
+# 找到最好的参数组合，并打印
+max_index <- which.max(record_acc)
+print(record_param[max_index])
+print(record_acc[max_index])
+write.csv(results_df, "SVM_results.csv", row.names = FALSE)
+}
+```
+
+
+#### Final SVM model
+
+The final optimal Costs is 2, degree is 3 (default), and gamma is default, which we used to train the final model.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+###final model SVM
+data <- read.csv("train.csv")
+data <- data[, !(names(data) == "X")]
+set.seed(1019)
+trainIndex <- createDataPartition(data$status, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+train_data <- data[trainIndex,]
+test_data  <- data[-trainIndex,]
+
+class_weights <- table(train_data$status)
+class_weights <- 1 / class_weights
+class_weights <- class_weights / sum(class_weights)
+
+pca <- prcomp(train_data[, -which(names(train_data) == "status")], center = TRUE, scale. = TRUE)
+var_explained <- cumsum(pca$sdev^2 / sum(pca$sdev^2))
+num_components <- which(var_explained >= 0.85)[1]
+
+train_pca <- pca$x[, 1:num_components]
+test_pca <- predict(pca, test_data[, -which(names(test_data) == "status")])[, 1:num_components]
+
+svm_model <- svm(as.factor(status) ~ ., data = data.frame(status = train_data$status, train_pca), kernel =  "polynomial",class.weights = class_weights,costs=2,probability = TRUE)
+
+svm_predictions <- predict(svm_model, data.frame(test_pca))
+preds <- predict(svm_model, data.frame(test_pca), probability = TRUE)
+
+
+cm_svm<- confusionMatrix(svm_predictions, as.factor(test_data$status))
+preds <- attr(preds, "probabilities")
+# AUC-ROC 
+roc_curve <- roc(test_data$status, preds[,2])
+
+
+roc_coords <- coords(roc_curve)
+x_range <- range(roc_coords$x)
+y_range <- range(roc_coords$y)
+
+plot(roc_curve, main="ROC Curve", col="blue", lwd=3, xlim=c(1, 0), ylim=c(0, 1))
+
+abline(h=0, v=1, col="red", lwd=2, lty=2)
+auc_value <- auc(roc_curve)
+text(1, 1, labels=sprintf("AUC = %0.2f", auc_value), adj=1)
+
+conf_matrix <- cm_svm
+# Create Confusion Matrix Visualization
+cm_data <- as.data.frame(as.table(conf_matrix$table))
+cm_data$Reference <- factor(cm_data$Reference, levels = c("0", "1"))
+cm_data$Prediction <- factor(cm_data$Prediction, levels = c("1", "0"))
+cm_data$n <- as.numeric(cm_data$Freq)
+
+# Visualize Confusion Matrix
+confusion_plot <- ggplot(data = cm_data, aes(x = Prediction, y = Reference)) +
+  geom_tile(aes(fill = n), color = "white", size = 0.5) +
+  geom_text(aes(label = sprintf("%d", n)), vjust = 1, color = "white", size = 5, fontface = "bold") +
+  scale_fill_gradient(low = "#B2C2D8", high = "#74B3D8") +
+  theme_minimal() +
+  labs(fill = "Number of Observations", title = "Confusion Matrix of SVM", x = "Predicted", y = "Actual") +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    axis.title.x = element_text(size = 14, face = "bold"),
+    axis.title.y = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    legend.text = element_text(size = 12)
+  )
+
+print(confusion_plot)
+
+
+print_confusion_matrix_list(cm_svm)
+
+
+```
+The F1 of SVM is close to 0.38, the recall is 0.422, and the accuracy is 0.893. the detection of positive samples is very strong, but it is easy to identify negative samples as positive samples. the AOC is 0.84, which is not as full as the other models, which means that the model is weak in its ability to separate the positive and negative samples, but it can still meet the requirements.
+
+```{r}
+png("SVM_roc_curve.png", width = 800, height = 600)
+# Plotting commands for ROC curve
+dev.off()
+
+png("SVM_confusion_matrix.png", width = 800, height = 600)
+# Plotting commands for confusion matrix
+dev.off()
+
+```
+<center>
+  <img src="SVM_roc_curve.png" alt="emblem" width="350" height="280"><img src="SVM_confusion_matrix.png" alt="emblem" width="450" height="290">
+</center>
+
+
+### 4.2 LDA
+
+Linear Discriminant Analysis is a  supervised dimensionality reduction and classification method developed by Ronald A. Fisher in 1936 **(Fisher, 1936)**.  While LDA shares similarities with PCA as a dimensionality reduction technique, it differs crucially in that LDA takes into account category information. At its core, LDA seeks a linear combination of feature spaces to maximize inter-class differences and minimize intra-class variations. While LDA inherently has few parameters, the LDA package provided by R requires that the data exhibit minimal multicollinearity. To address this, data are often pre-processed using PCA prior to applying LDA. The principal component contributions retained by PCA can then serve as parameters for subsequent analyses. It's crucial to note that LDA operates under the assumption that data within each category follows a multivariate normal distribution and shares a common covariance matrix across categories. When these assumptions are not met, LDA's performance might suffer.
+
+#### Girdsearch
+
+To optimize the performance of our model, LDA requires careful parameter tuning.
+
+**tol:** decide if a matrix is singular; it will reject variables and linear combinations of unit-variance variables whose variance is less than tol^2. (Default value: 1e-4).
+
+**dimen:** this represents the maximum dimension of the LDA, the default value is the input dimension minus one.
+
+**VAR:** Since multicollinearity must be removed by PCA, the principal component contribution retained by PCA can also be used as a parameter.
+
+
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+data <- read.csv("train.csv")
+data <- data[, !(names(data) == "X")]
+set.seed(1019)
+###开始网格调参 LDA
+KNIT=FALSE
+if (KNIT) {
+train_indices <- createDataPartition(data$status, p = 0.8, list = FALSE)
+train_data_all <- data[train_indices, ]
+test_data <- data[-train_indices, ]
+variance_thresholds <- c(0.8,0.85,0.90, 0.95, 0.99)  
+tolerance_values <- c(1e-5,1e-4, 1e-3)  
+dimen_values <- c(1,3,5,7,9,11,'none')
+
+record_acc <- list()
+record_param <- list()
+results_df <- data.frame(variance_threshold=double(), tolerance_values=double(),dimen_values=double(), mean_F1=double())
+folds <- createFolds(train_data_all$status, k = 5, list = TRUE)
+for(var_threshold in variance_thresholds) {
+    for(tol_value in tolerance_values) {
+        for(dimen_value in dimen_values) {
+          acc <- list()
+            for(i in 1:5) {
+            
+                train_data <- train_data_all[-folds[[i]], ]
+                val_data <- train_data_all[folds[[i]], ]
+                pca <- prcomp(train_data[, -which(names(train_data) == "status")], center = TRUE, scale. = TRUE)
+                var_explained <- cumsum(pca$sdev^2 / sum(pca$sdev^2))
+                num_components <- which(var_explained >= var_threshold)[1]
+            
+                train_pca <- pca$x[, 1:num_components]
+                val_pca <- predict(pca, val_data[, -which(names(val_data) == "status")])[, 1:num_components]
+                lda_model <- lda(as.factor(status) ~ ., data = data.frame(status = train_data$status, train_pca),tol = tol_value, dimen = dimen_value)
+                lda_predictions <- predict(lda_model, data.frame(val_pca))
+                conf_matrix <- confusionMatrix(lda_predictions$class, as.factor(val_data$status))
+                acc <- c(acc, conf_matrix$byClass['F1'])
+                params<-c(var_threshold,tol_value,dimen_value)
+            }
+            record_param <- c(record_param, list(params))
+            record_acc <- c(record_acc, mean(unlist(acc)))
+             mean_F1 <- mean(unlist(acc))
+                  results_df <- rbind(results_df, data.frame(variance_threshold=var_threshold, 
+                                                             tolerance_values=tol_value,
+                                                             dimen_values=dimen_value,
+                                                             mean_F1=mean_F1))
+        }
+    }
+}
+
+max_index <- which.max(record_acc)
+print(record_param[max_index])
+print(record_acc[max_index])
+write.csv(results_df, "LDA_results.csv", row.names = FALSE)
+}
+```
+
+
+
+#### Final LDA model
+
+The optimal model tol is 1e-4 (default), dimen is the default, and PCA is to retain variables as close to 100 per cent as possible.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+###final model LDA
+data <- read.csv("train.csv")
+data <- data[, !(names(data) == "X")]
+set.seed(1019)
+trainIndex <- createDataPartition(data$status, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+train_data <- data[trainIndex,]
+test_data  <- data[-trainIndex,]
+
+pca <- prcomp(train_data[, -which(names(train_data) == "status")], center = TRUE, scale. = TRUE)
+var_explained <- cumsum(pca$sdev^2 / sum(pca$sdev^2))
+num_components <- which(var_explained >= 1)[1]
+
+train_pca <- pca$x[, 1:num_components]
+test_pca <- predict(pca, test_data[, -which(names(test_data) == "status")])[, 1:num_components]
+
+# LDA
+lda_model <- lda(as.factor(status) ~ ., data = data.frame(status = train_data$status, train_pca))
+lda_predictions <- predict(lda_model, data.frame(test_pca))
+
+
+cm_lda <- confusionMatrix(lda_predictions$class, as.factor(test_data$status))
+
+prob_values <- lda_predictions$posterior
+preds <- prob_values[,2]
+roc_curve <- roc(test_data$status, preds)
+
+roc_coords <- coords(roc_curve)
+
+x_range <- range(roc_coords$x)
+y_range <- range(roc_coords$y)
+plot(roc_curve, main="ROC Curve", col="blue", lwd=3, xlim=c(1, 0), ylim=c(0, 1))
+abline(h=0, v=1, col="red", lwd=2, lty=2)
+
+auc_value <- auc(roc_curve)
+text(1, 1, labels=sprintf("AUC = %0.2f", auc_value), adj=1)
+
+
+
+conf_matrix <- cm_lda
+# Create Confusion Matrix Visualization
+cm_data <- as.data.frame(as.table(conf_matrix$table))
+cm_data$Reference <- factor(cm_data$Reference, levels = c("0", "1"))
+cm_data$Prediction <- factor(cm_data$Prediction, levels = c("1", "0"))
+cm_data$n <- as.numeric(cm_data$Freq)
+
+# Visualize Confusion Matrix
+confusion_plot <- ggplot(data = cm_data, aes(x = Prediction, y = Reference)) +
+  geom_tile(aes(fill = n), color = "white", size = 0.5) +
+  geom_text(aes(label = sprintf("%d", n)), vjust = 1, color = "white", size = 5, fontface = "bold") +
+  scale_fill_gradient(low = "#B2C2D8", high = "#74B3D8") +
+  theme_minimal() +
+  labs(fill = "Number of Observations", title = "Confusion Matrix of LDA", x = "Predicted", y = "Actual") +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    axis.title.x = element_text(size = 14, face = "bold"),
+    axis.title.y = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    legend.text = element_text(size = 12)
+  )
+
+print(confusion_plot)
+print_confusion_matrix_list(cm_lda)
+```
+
+The LDA model has an F1 close to 0.4, a recall of 0.29, and an accuracy of 0.93. In terms of accuracy it is the highest of all the models, but the ability to distinguish between a small number of classes is lacking. the AUC of 0.89 is the highest of all the models, indicating that the model is capable of separating positive and negative samples.
+
+```{r}
+png("LDA_roc_curve.png", width = 800, height = 600)
+# Plotting commands for ROC curve
+dev.off()
+
+png("LDA_confusion_matrix.png", width = 800, height = 600)
+# Plotting commands for confusion matrix
+dev.off()
+
+```
+<center>
+  <img src="LDA_roc_curve.png" alt="emblem" width="350" height="280"><img src="SVM_confusion_matrix.png" alt="emblem" width="450" height="290">
+</center>
+
+### 4.3 LR
+
+Logistic Regression is a widely used statistical method for classification problems. It is one of the generalized linear models (GLM) where the core principle is to learn a linear combination of features to predict the target variable(). Unlike linear regression, which predicts continuous outcomes, logistic regression is designed to predict binary outcomes.  A significant advantage of logistic regression is its ability to provide probability estimates for decisions, rather than just categorical outcomes. the output of linear regression is transformed into a value between 0 and 1 using the sigmoid function. The decision threshold, which defaults to 0.5, can be adjusted manually to optimize metrics such as the F1-Score and accuracy. As a foundational tool in various statistical and machine learning applications, logistic regression is lauded for its simplicity and interpretability, often serving as a benchmark model.While logistic regression performs well on linearly separable data, its efficacy can wane on nonlinearly separable data (Nelder & Wedderburn,1972).
+
+#### Girdsearch
+
+To optimize the performance of our model, LR requires careful parameter tuning.
+
+**weights**: an optional vector of values that assigns weights to each observation in the model. Weights are used to assign different importance to different observations in model fitting. (Default value: all observations have equal weights).
+
+**Alpha:**It controls the trade-off between L1 regularisation and L2 regularisation.
+
+**Lambda:**This is the parameter for the strength of the regularisation and it controls the model complexity: when it is 0, the model is not regularised. This can lead to model overfitting. When it increases, the strength of regularisation increases and the complexity of the model decreases, which may help prevent overfitting.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+data <- read.csv("train.csv")
+data <- data[, !(names(data) == "X")]
+set.seed(1019)
+###LR
+KNIT=FALSE
+if (KNIT) {
+library(glmnet)
+train_indices <- createDataPartition(data$status, p = 0.8, list = FALSE)
+train_data_all <- data[train_indices, ]
+test_data <- data[-train_indices, ]
+
+record_acc <- list()
+record_param <- list()
+results_df <- data.frame(lambda_value=double(), alpha=double(), mean_F1=double())
+lambda_values <- c(0.0005,0.001,0.005, 0.01)
+alphas<-c(0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1)
+folds <- createFolds(train_data_all$status, k = 5, list = TRUE)
+for (a in alphas){
+for(lambda in lambda_values) {
+  acc <- list()
+  for(i in 1:5) {
+    train_data <- train_data_all[-folds[[i]], ]
+    val_data <- train_data_all[folds[[i]], ]
+  
+    class_counts <- table(train_data$status)
+    class_weights <- max(class_counts) / class_counts
+
+    pca <- prcomp(train_data[, -which(names(train_data) == "status")], center = TRUE, scale. = TRUE)
+    var_explained <- cumsum(pca$sdev^2 / sum(pca$sdev^2))
+    num_components <- which(var_explained >= 0.99999)[1]
+    train_pca <- pca$x[, 1:num_components]
+    val_pca <- predict(pca, val_data[, -which(names(val_data) == "status")])[, 1:num_components]
+
+    x <- as.matrix(data.frame(train_pca))
+    y <- as.factor(train_data$status)
+    weighted_logistic_model <- glmnet(x, y, alpha = a, lambda = lambda, family = "binomial", weights = rep(class_weights, times = table(train_data$status)))
+    prob_predictions <- predict(weighted_logistic_model, s = lambda, newx = as.matrix(data.frame(val_pca)), type = "response")[,1]
+    binary_predictions <- ifelse(prob_predictions > 0.5, 1, 0)
+    conf_matrix <- confusionMatrix(as.factor(binary_predictions), as.factor(val_data$status))
+    acc <- c(acc, conf_matrix$byClass['F1'])
+    params<-c(a,lambda)
+  }
+    record_acc <- c(record_acc, mean(unlist(acc)))
+    record_param <- c(record_param, list(params))
+    mean_F1 <- mean(unlist(acc))
+    results_df <- rbind(results_df, data.frame(lambda_value=lambda, alpha=a, mean_F1=mean_F1))
+}
+}
+max_index <- which.max(record_acc)
+print(record_param[max_index])
+print(record_acc[max_index])
+write.csv(results_df, "LR_results.csv", row.names = FALSE)
+}
+```
+
+
+#### Final LR model
+
+The best model is the base model without regularisation
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+###final model LR
+data <- read.csv("train.csv")
+data <- data[, !(names(data) == "X")]
+set.seed(1019)
+# Split the data into training and test sets
+trainIndex <- createDataPartition(data$status, p = .8, list = FALSE, times = 1)
+train_data <- data[trainIndex,]
+test_data  <- data[-trainIndex,]
+class_counts <- table(train_data$status)
+class_weights <- max(class_counts) / class_counts
+# PCA
+pca <- prcomp(train_data[, -which(names(train_data) == "status")], center = TRUE, scale. = TRUE)
+var_explained <- cumsum(pca$sdev^2 / sum(pca$sdev^2))
+num_components <- which(var_explained >= 1)[1]
+train_pca <- pca$x[, 1:num_components]
+test_pca <- predict(pca, test_data[, -which(names(test_data) == "status")])[, 1:num_components]
+
+# Weighted logistic regression with class weights
+# Adjust the weights 0.5 and 2 according to your needs
+weighted_logistic_model <- glm(status ~ ., data = data.frame(status = train_data$status, train_pca), 
+                              family = binomial(), weights = rep(class_weights, times = table(train_data$status)))
+
+# Make predictions
+preds <- predict(weighted_logistic_model, newdata = data.frame(test_pca), type = "response")
+predictions <- ifelse(preds > 0.5, 1, 0)
+
+# Confusion Matrix
+cm_lr <- confusionMatrix(as.factor(predictions), as.factor(test_data$status))
+
+roc_curve <- roc(test_data$status, preds)
+roc_coords <- coords(roc_curve)
+x_range <- range(roc_coords$x)
+y_range <- range(roc_coords$y)
+plot(roc_curve, main="ROC Curve", col="blue", lwd=3, xlim=c(1, 0), ylim=c(0, 1))
+
+abline(h=0, v=1, col="red", lwd=2, lty=2)
+
+auc_value <- auc(roc_curve)
+text(1, 1, labels=sprintf("AUC = %0.2f", auc_value), adj=1)
+
+conf_matrix <- cm_lr
+# Create Confusion Matrix Visualization
+cm_data <- as.data.frame(as.table(conf_matrix$table))
+cm_data$Reference <- factor(cm_data$Reference, levels = c("0", "1"))
+cm_data$Prediction <- factor(cm_data$Prediction, levels = c("1", "0"))
+cm_data$n <- as.numeric(cm_data$Freq)
+
+# Visualize Confusion Matrix
+confusion_plot <- ggplot(data = cm_data, aes(x = Prediction, y = Reference)) +
+  geom_tile(aes(fill = n), color = "white", size = 0.5) +
+  geom_text(aes(label = sprintf("%d", n)), vjust = 1, color = "white", size = 5, fontface = "bold") +
+  scale_fill_gradient(low = "#B2C2D8", high = "#74B3D8") +
+  theme_minimal() +
+  labs(fill = "Number of Observations", title = "Confusion Matrix of LR",x = "Predicted", y = "Actual") +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    axis.title.x = element_text(size = 14, face = "bold"),
+    axis.title.y = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    legend.text = element_text(size = 12)
+  )
+
+print(confusion_plot)
+
+
+print_confusion_matrix_list(cm_lr)
+```
+
+The logistic regression has an F1 of 0.38, a recall of just 0.28, and an accuracy of 0.929. This indicates that the model is experiencing severe overfitting to the majority of the classes. the AOC is 0.88, which is relatively full, suggesting that the model is more than capable of separating positive and negative samples.
+
+```{r}
+png("LR_roc_curve.png", width = 800, height = 600)
+# Plotting commands for ROC curve
+dev.off()
+
+png("LR_confusion_matrix.png", width = 800, height = 600)
+# Plotting commands for confusion matrix
+dev.off()
+
+```
+<center>
+  <img src="LR_roc_curve.png" alt="emblem" width="350" height="280"><img src="LR_confusion_matrix.png" alt="emblem" width="450" height="290">
+</center>
+
+### 4.4 XGBoost
+
+XGBoost, known as "eXtreme Gradient Boosting", is a state-of-the-art technique based on the gradient boosting algorithm **(Chen & Guestrin, 2016)**. Gradient Boosting, as an ensemble learning method, aims to form a powerful predictive model by superimposing multiple weak models. The core idea lies in the fact that each tree in the model is optimized and constructed based on the errors of the previous tree. In this framework, each iteration attempts to correct the deficiencies of the previous round, thus gradually strengthening the predictive accuracy of the model. The predictions of the new model in each iteration are combined with the predictions of the previous model to form an ensemble prediction. XGBoost supports parallel computation and built-in cross-validation, making training and tuning more efficient. It brings together the algorithmic features of GBDT and RF, with its introduction of regularization of linear models and column sampling of random forests for GBDT. 
+
+#### Girdsearch
+
+For optimizing the performance of our model, XGBoost offers a variety of hyperparameters that require meticulous tuning.
+
+**nrounds:**  It represents the maximum number of iterations for boosting. In each iteration, the model constructs a new decision tree. If the value of nrounds is increased, the complexity of the model will also increase. This increase might enhance the performance of the model, but it might also lead to overfitting. Therefore, selecting the value of nrounds should be done with caution. Typically, both nrounds and eta are considered together to control the complexity of the model. However, in this specific scenario, we choose to fix the value of eta and use cross-validation to find the optimal number of iterations for each fixed eta value.
+
+**eta:** It governs the learning rate by scaling the contribution of each tree by a factor within the range 0 < eta < 1 before it's added to the current approximation. A lower value of eta implies that the model might not learn sufficiently by the time training concludes, potentially leading to underfitting. Conversely, a higher eta suggests that the model might over-learn by the end of training, risking overfitting or potentially overshooting the optimum. (Default value: 0.3).
+
+**max_depth:** maximum depth of the tree. As max_depth increases, the model becomes more intricate, capturing more nuanced information, but this also elevates the risk of overfitting. (Default value: 6).
+
+**subsample:** the ratio of the subset of training data instances. For instance, setting it to 0.5 means that XGBoost will randomly select 50% of the data instances from the dataset to grow trees. Training with such a subset of data can reduce the model's variance, thereby helping to prevent overfitting. However, if the subsample value is set too low, it might render the model training unstable or cause the model to underfit. (Default value: 1).
+
+**gamma:** the minimum loss reduction required to make further partitions on a leaf node of the tree. The larger the value of gamma, the more conservative the algorithm becomes. This parameter primarily serves as a regularization measure, aiding in preventing overfitting. However, if the value of gamma is set too low, it might result in the model being insufficiently complex, leading to underfitting. (Default value: 0)
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+data <- read.csv("train.csv")
+data <- data[, !(names(data) == "X")]
+set.seed(1019)
+###XGBoost
+KNIT=FALSE
+if (KNIT) {
+data <- read.csv("train.csv")
+data <- data[ , !(names(data) %in% "X")]
+train_indices <- createDataPartition(data$status, p = 0.8, list = FALSE)
+train_data_all <- data[train_indices, ]
+test_data <- data[-train_indices, ]
+nrounds<-c(50,100,150,200,250,300,350,400)
+eta <- c(0.05, 0.1,0.15,0.2)
+maxdepth <- c(4,5,6,7,8,9,10)
+colsample_bytree_values <- c(0.8, 1)
+gamma_values <- c(0, 1)
+
+###添加的代码
+results_df <- data.frame(nrounds=integer(), eta=double(), max_depth=integer(),
+                         colsample_bytree=double(), gamma=double(), mean_F1=double())
+record_acc <- list()
+record_param <- list()
+for (n in nrounds){
+  for (e in eta) {
+      for (m in maxdepth) {
+          for (c in colsample_bytree_values) {
+              for (g in gamma_values) {
+                  acc <- list()
+                  folds <- createFolds(train_data_all$status, k = 5, list = TRUE)
+                  for(i in 1:5) {
+                      train_data <- train_data_all[-folds[[i]], ]
+                      val_data <- train_data_all[folds[[i]], ]
+                      pos_weight <- sum(train_data$status == 0) / sum(train_data$status == 1)
+  
+                      train_matrix <- xgb.DMatrix(data = as.matrix(train_data[, !colnames(train_data) %in% "status"]), label = train_data$status)
+                      val_matrix <- xgb.DMatrix(data = as.matrix(val_data[, !colnames(val_data) %in% "status"]), label = val_data$status)
+  
+                      params <- list(
+                          objective = "binary:logistic",
+                          eval_metric = "logloss",
+                          eta = e,
+                          max_depth = m,
+                          colsample_bytree = c,
+                          gamma = g,
+                          nrounds = n
+                      )
+  
+                      model <- xgb.train(params = params, 
+                                         data = train_matrix, 
+                                         nrounds =n, 
+                                         scale_pos_weight = pos_weight,
+                                         verbose=FALSE)
+  
+                      preds <- predict(model, val_matrix)
+                      predicted_labels <- ifelse(preds > 0.5, 1, 0)
+                      conf_matrix <- confusionMatrix(as.factor(predicted_labels), as.factor(val_data$status))
+                      acc <- c(acc, conf_matrix$byClass['F1'])
+                      
+                  }
+                 
+                  record_acc <- c(record_acc, mean(unlist(acc)))
+                  record_param <- c(record_param, list(params))
+                  mean_F1 <- mean(unlist(acc))
+                  results_df <- rbind(results_df, data.frame(nrounds=n, eta=e, max_depth=m,
+                                                     colsample_bytree=c, gamma=g, mean_F1=mean_F1))
+              }
+          }
+      }
+  }
+}
+max_index <- which.max(record_acc)
+print(record_param[max_index])
+print(record_acc[max_index])
+# Write the results to a CSV file
+write.csv(results_df, "xgboost_results.csv", row.names = FALSE)
+
+}
+```
+
+
+
+
+#### Final XGBoost model
+
+The optimal model is a learning rate of 0.1, nrounds of 100, maximum tree depth of 8,and default values for other parameters.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+library(gridGraphics)
+###final model XGBOOST
+data <- read.csv("train.csv")
+data <- data[, !(names(data) == "X")]
+set.seed(1019)
+train_indices <- createDataPartition(data$status, p = 0.8, list = FALSE)
+train_data <- data[train_indices, ]
+test_data <- data[-train_indices, ]
+pos_weight <- sum(train_data$status == 0) / sum(train_data$status == 1)
+train_matrix <- xgb.DMatrix(data = as.matrix(train_data[, !(names(train_data) == "status")]), label = train_data$status)
+test_matrix <- xgb.DMatrix(data = as.matrix(test_data[, !(names(test_data) == "status")]), label = test_data$status)
+
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "logloss",
+  eta = 0.1,
+  max_depth = 8,
+  colsample_bytree = 1
+  )
+model <- xgb.train(params = params, 
+                   data = train_matrix, 
+                   scale_pos_weight = pos_weight,
+                   nrounds = 100,
+                   verbose=FALSE
+                   )
+  # Predicting on the test set
+preds <- predict(model, test_matrix)
+predicted_labels <- ifelse(preds > 0.5, 1, 0)
+cm_xgb <- confusionMatrix(as.factor(predicted_labels), as.factor(test_data$status))
+mat <- xgb.importance(feature_names = model$feature_names, model = model)
+xgb.plot.importance(importance_matrix = mat[1:20])
+title(main = "Feature Importance", font.main = 3)
+roc_curve <- roc(test_data$status, preds)
+roc_coords <- coords(roc_curve)
+x_range <- range(roc_coords$x)
+y_range <- range(roc_coords$y)
+plot(roc_curve, main="ROC Curve", col="blue", lwd=3, xlim=c(1, 0), ylim=c(0, 1))
+abline(h=0, v=1, col="red", lwd=2, lty=2)
+auc_value <- auc(roc_curve)
+text(1, 1, labels=sprintf("AUC = %0.2f", auc_value), adj=1)
+
+
+conf_matrix <- cm_xgb
+# Create Confusion Matrix Visualization
+cm_data <- as.data.frame(as.table(conf_matrix$table))
+cm_data$Reference <- factor(cm_data$Reference, levels = c("0", "1"))
+cm_data$Prediction <- factor(cm_data$Prediction, levels = c("1", "0"))
+cm_data$n <- as.numeric(cm_data$Freq)
+
+# Visualize Confusion Matrix
+confusion_plot <- ggplot(data = cm_data, aes(x = Prediction, y = Reference)) +
+  geom_tile(aes(fill = n), color = "white", size = 0.5) +
+  geom_text(aes(label = sprintf("%d", n)), vjust = 1, color = "white", size = 5, fontface = "bold") +
+  scale_fill_gradient(low = "#B2C2D8", high = "#74B3D8") +
+  theme_minimal() +
+  labs(fill = "Number of Observations", title = "Confusion Matrix of XGBoost", x = "Predicted", y = "Actual") +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    axis.title.x = element_text(size = 14, face = "bold"),
+    axis.title.y = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    legend.text = element_text(size = 12)
+  )
+
+print(confusion_plot)
+
+print_confusion_matrix_list(cm_xgb)
+```
+The XGBoost model has an F1 of 0.48, a recall of 0.51, and an accuracy of 0.913. The performance is second only to Catboost, which is better than all the models for recognising positive samples, but is still insufficient for the task. the AOC is 0.88, which is relatively full, indicating that the model is very good at separating positive and negative samples. Based on the importance of characteristics age, year surveyed, poverty, smoking and BMI are more important.
+
+```{r}
+png("LR_roc_curve.png", width = 800, height = 600)
+# Plotting commands for ROC curve
+dev.off()
+
+png("LR_confusion_matrix.png", width = 800, height = 600)
+# Plotting commands for confusion matrix
+dev.off()
+
+```
+<center>
+  <img src="LR_roc_curve.png" alt="emblem" width="350" height="280"><img src="LR_confusion_matrix.png" alt="emblem" width="450" height="290">
+</center>
+
+
+### 4.5 Catboost
+CatBoost is an acronym for "classification boosting". It was developed by a team of researchers at Yandex with the aim of providing high-performance gradient boosting models that are particularly suitable for datasets with categorical features **(Dorogush et al., 2018)**. A distinctive feature of CatBoost compared to other gradient boosting methods is the ability to supervise the processing of categorical features without the need for pre-processing such as one-shot coding. In addition, CatBoost employs an ordered training technique that effectively prevents overfitting. It is a tree-based interpretable model, which is particularly suitable for dealing with categorical variables in classification and regression tasks. After its introduction at the NIPS conference, it has gained wide acceptance.One of the core attributes of CatBoost is its complex algorithm, which maintains balance and symmetry throughout the iteration process, ensuring stable and reliable model training.
+
+#### Girdsearch
+
+To optimize the performance of our model, CatBoost provides a variety of hyperparameters that require careful tuning.
+Iterations: indicates the number of trees in the training process, a new tree is added at each iteration, a larger number of iterations improves the performance of the model but may also lead to overfitting. (Default value: 1000).
+
+**Depth:** the maximum depth of the tree. Trees with deeper depths may capture more complex patterns in the data, but are also more prone to overfitting. Typically, depth is exponentially related to the number of leaf nodes in the tree. (Default value: 6).
+
+**Learning_rate:** controls the contribution of each iteration to the final prediction. A smaller learning rate may require more iterations, but allows the model to converge to a better solution. (Default value: 0.03).
+
+**class_weights:** the weights that can be specified for each class when the dataset is not balanced in terms of classes, these weights adjust the loss function to focus more on fewer classes. (Default value is 1 for all classes).
+
+**task_type:** specifies which hardware the model should run on.' CPU' indicates the use of a central processing unit, while 'GPU' indicates the use of a graphics processor. Using a GPU can greatly accelerate training, especially for large datasets or deep models. (Default value: 'CPU').
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+data <- read.csv("train.csv")
+data <- data[, !(names(data) == "X")]
+set.seed(1019)
+KNIT=FALSE
+if (KNIT) {
+train_indices <- createDataPartition(data$status, p = 0.8, list = FALSE)
+train_data_all <- data[train_indices, ]
+test_data <- data[-train_indices, ]
+depth <- c(3,4,5,6,7,8,9,10)
+trees<-c(100,150,200,250,300,350,400,450,500)
+record_acc <- list()
+record_param <- list()
+###添加的代码
+
+results_df <- data.frame(trees=integer(), depth=integer(), mean_F1=double())
+for (it in trees) {
+  for (m in depth) {
+    acc <- list()
+    folds <- createFolds(train_data_all$status, k = 5, list = TRUE)
+    for(i in 1:5) {
+      train_data <- train_data_all[-folds[[i]], ]
+      val_data <- train_data_all[folds[[i]], ]
+      class_weights <- c(1, sum(train_data$status == 0) / sum(train_data$status == 1))
+      train_data_pool <- catboost.load_pool(data = train_data[, !(names(train_data) == "status")], label = train_data$status)
+      val_data_pool <- catboost.load_pool(data = val_data[, !(names(val_data) == "status")], label = val_data$status)
+      params <- list(
+        iterations = it,
+        depth = m,
+        class_weights = class_weights,
+        loss_function = 'Logloss',
+        custom_metric = list('Accuracy'),
+        eval_metric = 'Accuracy',
+        verbose = 0,
+        task_type = 'GPU'
+      )
+      
+      # Train the model
+      model <- catboost.train(train_data_pool, params = params)
+      
+      # Predict on test data
+      preds <- catboost.predict(model, val_data_pool, prediction_type = 'Class')
+      conf_matrix <- confusionMatrix(as.factor(preds), as.factor(val_data$status))
+      acc <- c(acc, conf_matrix$byClass['F1'])
+    }
+    record_acc <- c(record_acc, mean(unlist(acc)))
+    record_param <- c(record_param, list(list(tree=n, depth=m)))
+    mean_F1 <- mean(unlist(acc))
+    results_df <- rbind(results_df, data.frame(trees=it, depth=m, mean_F1=mean_F1))
+  }
+}
+max_index <- which.max(record_acc)
+print(record_param[max_index])
+print(record_acc[max_index])
+# Write the results to a CSV file
+write.csv(results_df, "catboost_results.csv", row.names = FALSE)
+}
+```
+
+
+#### Final Catboost model
+
+The optimal parameters are a subtree of 300 and a maximum subtree depth of 8.
+
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
+data <- read.csv("train.csv")
+data <- data[, !(names(data) == "X")]
+###final model catboost
+set.seed(1019)
+train_indices <- createDataPartition(data$status, p = 0.8, list = FALSE)
+train_data <- data[train_indices, ]
+test_data <- data[-train_indices, ]
+class_weights <- c(1, sum(train_data$status == 0) / sum(train_data$status == 1))
+train_data_pool <- catboost.load_pool(data = train_data[, !(names(train_data) == "status")], label = train_data$status)
+test_data_pool <- catboost.load_pool(data = test_data[, !(names(test_data) == "status")], label = test_data$status)
+params <- list(
+  iterations = 300,
+  depth = 8,
+  loss_function = 'Logloss',
+  custom_metric = list('Accuracy'),
+  eval_metric = 'Accuracy',
+  class_weights = class_weights,
+  verbose = 0 ,
+  task_type = 'GPU'
+)
+
+model <- catboost.train(train_data_pool, params = params)
+
+preds <- catboost.predict(model, test_data_pool, prediction_type = 'Class')
+cm_cat <- confusionMatrix(as.factor(preds), as.factor(test_data$status))
+preds_pro <- catboost.predict(model, test_data_pool, prediction_type = 'Probability')
+
+
+
+cat_imp <- catboost.get_feature_importance(model)
+var_names <- row.names(cat_imp)
+cat <- data.frame(feature = var_names, value = cat_imp)
+cat <- cat[order(-cat$value), ]
+cat_top20 <- head(cat, 20)
+cat_top20$value_percentage <- (cat_top20$value / sum(cat$value)) * 100
+options(repr.plot.width = 10, repr.plot.height = 6)
+barplot(cat_top20$value_percentage, 
+        names.arg = cat_top20$feature,
+        xlim = c(0, max(cat_top20$value_percentage) * 1.1), 
+        col = "gray",
+        border = "transparent",
+        horiz = TRUE, 
+        las = 1, 
+        cex.names = 0.7,
+        xlab = "Feature Importance (%)",
+        space = 0.2)
+
+
+roc_curve <- roc(test_data$status, preds_pro)
+roc_coords <- coords(roc_curve)
+x_range <- range(roc_coords$x)
+y_range <- range(roc_coords$y)
+roc_plot <-plot(roc_curve, main="ROC Curve", col="blue", lwd=3, xlim=c(1, 0), ylim=c(0, 1))
+abline(h=0, v=1, col="red", lwd=2, lty=2)
+auc_value <- auc(roc_curve)
+text(1, 1, labels=sprintf("AUC = %0.2f", auc_value), adj=1)
+
+
+
+conf_matrix <- cm_cat
+# Create Confusion Matrix Visualization
+cm_data <- as.data.frame(as.table(conf_matrix$table))
+cm_data$Reference <- factor(cm_data$Reference, levels = c("0", "1"))
+cm_data$Prediction <- factor(cm_data$Prediction, levels = c("1", "0"))
+cm_data$n <- as.numeric(cm_data$Freq)
+
+# Visualize Confusion Matrix
+confusion_plot <- ggplot(data = cm_data, aes(x = Prediction, y = Reference)) +
+  geom_tile(aes(fill = n), color = "white", size = 0.5) +
+  geom_text(aes(label = sprintf("%d", n)), vjust = 1, color = "white", size = 5, fontface = "bold") +
+  scale_fill_gradient(low = "#B2C2D8", high = "#74B3D8") +
+  theme_minimal() +
+  labs(fill = "Number of Observations", title = "Confusion Matrix of CatBoost", x = "Predicted", y = "Actual") +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    axis.title.x = element_text(size = 14, face = "bold"),
+    axis.title.y = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    legend.text = element_text(size = 12)
+  )
+
+print(confusion_plot)
+print_confusion_matrix_list(cm_cat)
+```
+
+
+The CatBoost model has an F1 close to 0.5, a recall greater than 0.512, and an accuracy of 0.917. It is the highest scoring model of almost all, with the strongest ability to identify and differentiate between positive samples. the AOC of 0.88 is relatively full, indicating the model's ability to distinguish between positive and negative samples. Based on the importance of characteristics age, year surveyed, whether they are poor, smoking and BMI are more important.
+
+```{r}
+png("CAT_roc_curve.png", width = 800, height = 600)
+# Plotting commands for ROC curve
+dev.off()
+
+png("CAT_confusion_matrix.png", width = 800, height = 600)
+# Plotting commands for confusion matrix
+dev.off()
+
+```
+<center>
+  <img src="CAT_roc_curve.png" alt="emblem" width="350" height="280"><img src="CAT_confusion_matrix.png" alt="emblem" width="450" height="290">
+</center>
+
+### 4.6 Results Comparison
+
+```{r fig.width=18, fig.height=8,eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+extract_metrics <- function(cm, model_name) {
+  data.frame(
+    Model = model_name,
+    Metric = c('Accuracy', 'Recall', 'F1',"Kappa"),
+    Score = c(cm$overall['Accuracy'], cm$byClass['Recall'], cm$byClass['F1'],cm$overall['Kappa'])
+  )
+}
+
+metrics <- rbind(
+  extract_metrics(cm_cat, 'CAT'),
+  extract_metrics(cm_xgb, 'XGB'),
+  extract_metrics(cm_lda, 'LDA'),
+  extract_metrics(cm_lr, 'LR'),
+  extract_metrics(cm_svm, 'SVM')
+)
+p1 <- ggplot(subset(metrics, Metric == "Accuracy"), aes(x = Model, y = Score, fill = Model)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  labs(y = "Accuracy", x = "Model") +
+  theme_minimal() +
+  scale_fill_brewer(palette="Set3") +
+  scale_x_discrete(limits = c('CAT', 'XGB', 'LDA', 'LR', 'SVM'))
+
+
+p2 <- ggplot(subset(metrics, Metric == "Recall"), aes(x = Model, y = Score, fill = Model)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  labs(y = "Recall", x = "Model") +
+  theme_minimal() +
+  scale_fill_brewer(palette="Set3") +
+  scale_x_discrete(limits = c('CAT', 'XGB', 'LDA', 'LR', 'SVM'))
+
+
+p3 <- ggplot(subset(metrics, Metric == "F1"), aes(x = Model, y = Score, fill = Model)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  labs(y = "F1 Score", x = "Model") +
+  theme_minimal() +
+  scale_fill_brewer(palette="Set3") +
+  scale_x_discrete(limits = c('CAT', 'XGB', 'LDA', 'LR', 'SVM'))
+
+p4 <- ggplot(subset(metrics, Metric == "Kappa"), aes(x = Model, y = Score, fill = Model)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  labs(y = "Kappa", x = "Model") +
+  theme_minimal() +
+  scale_fill_brewer(palette="Set3") +
+  scale_x_discrete(limits = c('CAT', 'XGB', 'LDA', 'LR', 'SVM'))
+
+grid.arrange(p1, p2, p3,p4, ncol = 4,top = textGrob("Model Performance Comparsion",gp = gpar(fontface = "bold", fontsize = 24)))
+
+```
+
+#### 4.6.1 F1 Score & Recall
+
+F1 and Recall are the parts of all models that have the largest performance difference. The bar chart shows that Catboost and XGBoost's F1 score exceeds LR,LDA and SVM by about 0.1. In terms of recall Catboost and XGBoost both exceed 0.5, SVM exceeds 0.4, while LR,LDA is less than 0.3. This shows that only SVM and the Integrated Tree Model are qualified in terms of identifying the positive examples. The other models miss a large number of minority (dead) samples due to overfitting to the majority class, which is not desired.
+
+#### 4.6.2 AUC
+
+In terms of AUC, all models have full curves with little variation, with LDA being the highest at 0.89, LR,Catboost and XGBoost all reaching 0.88, and SVM being slightly weaker at 0.84. This indicates that all models are up to snuff in terms of their ability to distinguish between positive and negative samples.
+
+#### 4.6.3 Accuracy 
+
+From the accuracy point of view, there is not much difference between the five models, among which the traditional machine learning models LR and LDA are the highest, the integrated tree models Catboost and XGBoost are the second highest with values above 90%, and Support Vector Machines are the lowest but also greater than 89%. This indicates that all models have good classification correctness from the overall sample.
+
+#### 4.6.4 Kappa
+
+Kappa coefficients are often used in medical and health research to assess the reliability and consistency of diagnostic tests. The one established in this study is itself a diagnostic model. Random chance in the presence of sample imbalance leads to an increased likelihood of correct prediction, and the Kappa coefficient takes into account the effects of random categorisation, so it is a better indicator of the actual performance of the model than simple accuracy. So the difference in model performance on Kappa is larger than on accuracy. Among them Catboost performs the best and SVM performs the weakest.
+
+#### 4.6.5Complexity
+In terms of time complexity, the integrated tree model is larger than the traditional machine learning model, but since the integrated tree model can be optimised with the help of a graphics card the actual running time in training tends to be less than machine learning models like logistic regression and support vector machines. At the same time, due to the kernel trick, Support Vector Machines are the slowest model to train. On the contrary, LDA is the fastest training model.
+
+Taken together, the Catboost model performs best on the F1 and Kappa coefficients, where model performance varies the most, and ranks high in accuracy and AUC as well as time complexity, so it is the most suitable model for this task.
+
+## 5.Conclusion
+
+### 5.1 Findings 
+In terms of business logic: From the importance of the characteristics visualised in the tree model, age, as well as the year of survey, poverty level, BMI, whether or not one smokes, and whether or not one is in a state of ill-health are the most important factors influencing mortality. The high importance of the year of survey was not expected, which indicates that medical care has developed rapidly during the last 20 years. In addition, exercise and water consumption, as well as dietary habits (especially vegetable intake) and caffeine intake, also play an important role, as well as some vitamins and proteins among the top 20 characteristics in both models.The conclusions of this study are largely in line with common sense.
+
+In terms of machine learning techniques:  In the face of such severely unbalanced datasets, computing category weights on a dataset is superior to oversampling it in terms of classification performance and time complexity, while newly proposed tree models have shown the best classification results in recent years, especially in terms of F1 scores, as represented by CatBoost. Moreover, the accuracy of traditional statistical models is qualitatively improved by the PCA reduction and the calculation of category weights. At the same time, from an interpretability point of view, tree models provide the importance of each feature, but not whether they have a positive or negative effect individually. Traditional LR (logistic regression), linear SVM and LDA show higher interpretability in this respect, but with the introduction of PCA methods, the interpretability of the original variables will be severely reduced. In addition, most integrated tree models support runtime optimisation, which takes less time to run than traditional machine learning models, although the time complexity is greater than traditional machine learning models. The Tabnet model, which introduces an attention mechanism, clearly achieves better results in terms of F1 scores, but overall, neural networks are inferior to the first two types of models, both in terms of training time consumption, model classification performance, and interpretability.
+
+### 5.2 Limitations
+Firstly, due to the unbalanced data, it can be seen that none of the F1 of the model exceeds 0.5,which means that our model is not very instructive.
+
+In addition, due to the PCA, some of the linear models become difficult to interpret and it is not possible to directly read out the effect of features on the model prediction.
+
+At the same time the importance of the features in the tree model does not give the direction of the impact this is not enough to support making more recommendations. In the final results the importance of the model may be biased because there is also a large correlation between the features themselves, which leads to overestimation of importance and underestimation of relevance for some of the features that are correlated.
+
+Finally the support of R language for the latest neural network packages is insufficient and the parameter tuning of many algorithms is restricted, which leads to the fact that Tabnet and MLP do not perform as well as they should.
+
+### 5.3 Future Work
+First of all Keras and torch provide good support for implementing complex neural networks on R and taking graphics card acceleration, and the model structure of more complex networks such as Tabnet can be reproduced based on the original paper(Arik, 2021).
+
+Currently, our classification threshold value is 0.5, which can be appropriately threshold offset to improve the accuracy, while the category weights are determined according to the inverse of the frequency of the category in the dataset, these values have room for tuning, and by adjusting the threshold value, we can reduce the overfitting of a few classes or most classes, and improve the F1**(Zhao, 2007)**.
+
+Meanwhile, this study adopts the K-Fold technique to ensure the objective measurement of the model performance corresponding to each set of parameters, in fact, the K models trained by K-Fold can also be fused by soft voting to further improve the prediction performance. Meanwhile, models with better performance on different metrics can also be integrated by voting, which is also promising to further improve the model performance**(Chatzimparmpas, 2021)**.
+
+In the dataset of this study there are also two labels Time and Leading, indicating survival time and cause of death. Further multiclassification models with COX survival analysis models can be attempted next to further explore the effect of each variable on survival time as well as death from specific diseases**(Cox, 1972)**.
+
+The retained importance of the original features in the trained model after PCA can actually be obtained and visualised by obtaining the principal component loadings and later combining them with the principal component weights output from the conventional model. In addition the SHAP package can be introduced to quantitatively analyse the impact of each feature on the prediction of each sample. In order to enhance the interpretability of the tree model**(Lundberg, 2017)**, its subtree nodes can be analysed to obtain more detailed information.
+
+Also this study removes more data columns and samples containing null values, which further leads to sample imbalance. A machine learning based data filling framework can be defined to predict the missing values of each column first, if the prediction is not as good as the mean (R-squared less than 0) or as good as the plurality (accuracy is not as good as the maximum class frequency) then we can consider the mean, the plurality to fill in or delete the samples. In fact, our team has already implemented this feature on python, but we have not been able to reproduce a similar effect on R due to arithmetic constraints.
+
+
+## 6.Contribution
+
+**Haixu Liu (16.7%)**: data cleaning and pre-processing, model building for Tabnet, MLP, Catboost and related parts of PPT design and report writing, literature review, model evaluation visualisation.
+
+**Muyan Wan (16.7%)**: LDA, KNN, LR, SVC model building, PPT design, correlation and distribution visualisation, report writing and layout, model evaluation and result visualisation, feature engineering.
+
+**Chenjie Qi(16.7%)**:RF, XGBoost model building, video editing, PPT design, report writing, reference checking, model evaluation and result visualisation.
+
+**YiPan Zhao(16.7%)**:LightGB,DT model building, video presentation, PPT design, report writing, reference checking, model evaluation model evaluation and result visualisation.
+
+**Xiyuan He(16.6%)**:Report Writing and Layout, Visualisation and Analysis, Video Presentation, PPT Design.
+
+**Yanyi Shen(16.6%)**: report writing and layout, visual analysis, video presentation, PPT design, video editing.
+
+## Reference
+
+Chen, T., & Guestrin, C.
+(2016).
+XGBoost: A Scalable Tree Boosting System.
+In Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining (pp. 785-794).
+<https://doi.org/10.1145/2939672.2939785>
+
+Cortes, C., & Vapnik, V. (1995).
+Support-vector networks.
+Machine Learning, 20(3), 273--297.
+<https://doi.org/10.1007/bf00994018>
+
+Cox, D.
+(1992).
+Regression models and Life-Tables.
+In Springer series in statistics (pp. 527--541).
+<https://doi.org/10.1007/978-1-4612-4380-9_37>
+
+Dorogush, A. V., Ershov, V., & Gulin, A.
+(2018).
+CatBoost: gradient boosting with categorical features support. 
+arXiv (Cornell University). 
+<https://arxiv.org/pdf/1810.11363.pdf>
+
+Fisher, R. A.
+(1936).
+The use of multiple measurements in taxonomic problems.
+Annals of Eugenics, 7(2), 179-188.
+<https://doi.org/10.1111/j.1469-1809.1936.tb02137.x>
+
+Salekshahrezaee, Z., Leevy, J. L., & Khoshgoftaar, T. M.
+(2021b).
+Feature extraction for class imbalance using a convolutional autoencoder and data sampling.
+2021 IEEE 33rd International Conference on Tools With Artificial Intelligence (ICTAI).
+<https://doi.org/10.1109/ictai52525.2021.00037>
+
+
+
+Yang, N., & Ismail, H.
+(2022b).
+Robust intelligent Learning algorithm using random forest and Modified-Independent component analysis for PV fault detection: in case of imbalanced data.
+IEEE Access, 10, 41119--41130.
+<https://doi.org/10.1109/access.2022.3166477>
+
+Salekshahrezaee, Z., Leevy, J. L., & Khoshgoftaar, T. M.
+(2023b).
+The effect of feature extraction and data sampling on credit card fraud detection.
+Journal of Big Data, 10(1).
+<https://doi.org/10.1186/s40537-023-00684-w>
+
+Nelder, J. A., & Wedderburn, R. W. M. (1972). Generalized Linear Models. Journal of the Royal Statistical Society. Series A (General), 135(3), 370-384. doi:10.2307/2344614
+
+Gulli, A., & Pal, S.
+(2017).
+Deep learning with Keras.
+Packt Publishing Ltd
+
+Zhao, H.
+(2007).
+Instance weighting versus threshold adjusting for cost-sensitive classification.
+Knowledge and Information Systems, 15(3), 321--334.
+<https://doi.org/10.1007/s10115-007-0079-1>
+
+
+Wang, L.
+(2005).
+Support Vector Machines: Theory and applications.
+In Studies in fuzziness and soft computing.
+<https://doi.org/10.1007/b95439>
+
+Yokosawa, E. B., Arthur, A. E., Rentschler, K. M., Wolf, G. T., Rozek, L. S., & Mondul, A. M.
+(2018).
+Vitamin D intake and survival and recurrence in head and neck cancer patients.
+The Laryngoscope, 128(11).
+<https://doi.org/10.1002/lary.27256>
+
+Afshin, A., Micha, R., Khatibzadeh, S., Fahimi, S., Shi, P., Powles, J., Singh, G., Yakoob, M. Y., Abdollahi, M., Al-Hooti, S., Farzadfar, F., Houshiarrad, A., Hwalla, N., Köksal, E., Musaiger, A. O., Pekcan, A. G., Sibai, A. M., Zaghloul, S., Danaei, G., .
+. . Mozaffarian, D.
+(2015).
+The impact of dietary habits and metabolic risk factors on cardiovascular and diabetes mortality in countries of the Middle East and North Africa in 2010: a comparative risk assessment analysis.
+BMJ Open, 5(5), e006385.
+<https://doi.org/10.1136/bmjopen-2014-006385>
+
+Zhou, W., Cheng, Y., Chen, J., Chen, H., Wang, M., Cao, W., He, C. Y., Zhao, Q., Zhang, P., Wang, W., Zheng, Y., & Chen, B.
+(2023).
+Exploring the impact of diabetes on the prognosis of gastric cancer patients based on the survival data of gastric cancer patients in NHANES database and the survival data of Chinese gastric cancer patients.
+Research Square (Research Square).
+<https://doi.org/10.21203/rs.3.rs-3421705/v1>
+
+Chatzimparmpas, A., Martins, R. M., Kucher, K., & Kerren, A. (2021, May). Empirical study: visual analytics for comparing stacking to blending ensemble learning. In 2021 23rd International Conference on Control Systems and Computer Science (CSCS) (pp. 1-8). IEEE.<https://ieeexplore.ieee.org/document/9481023/>
+
+Arik, S. Ö., & Pfister, T. (2021, May). Tabnet: Attentive interpretable tabular learning. In Proceedings of the AAAI conference on artificial intelligence (Vol. 35, No. 8, pp. 6679-6687).<https://arxiv.org/abs/1908.07442>
+
+Lundberg, S. M., & Lee, S. I. (2017). A unified approach to interpreting model predictions. Advances in neural information processing systems, 30.<https://dl.acm.org/doi/10.5555/3295222.3295230>
+
+Hirshkowitz, M., Whiton, K., Albert, S. M., Alessi, C., Bruni, O., DonCarlos, L.,Neubauer, D. N. (2015). National Sleep Foundation’s sleep time duration recommendations: methodology and results summary. Sleep Health, 1(1), 40-43.<https://pubmed.ncbi.nlm.nih.gov/29073412/>
